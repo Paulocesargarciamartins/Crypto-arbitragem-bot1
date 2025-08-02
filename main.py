@@ -67,3 +67,4 @@ def check_arbitrage():
 
 if __name__ == "__main__":
     check_arbitrage()
+test.
