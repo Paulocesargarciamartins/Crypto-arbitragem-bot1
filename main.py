@@ -3,7 +3,7 @@ import time
 import telegram
 
 # Configuração do bot Telegram
-TOKEN = "7218062934:AAEcgNpqN3itPQ-GzotVtR_eQc7g9FynbzQ"  # ⚠️ Não compartilhe publicamente
+TOKEN = "7218062934:AAEcgNpqN3itPQ-GzotVtR_eQc7g9FynbzQ"  # ⚠️ Nunca compartilhe esse token publicamente!
 CHAT_ID = "1093248456"
 
 bot = telegram.Bot(token=TOKEN)
