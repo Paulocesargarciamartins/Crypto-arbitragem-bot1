@@ -3,7 +3,7 @@ import time
 import telegram
 
 # Configuração do bot Telegram
-TOKEN = "7218062934:AAEcgNpqN3itPQ-GzotVtR_eQc7g9FynbzQ"  # ⚠️ Mantenha privado
+TOKEN = "7218062934:AAEcgNpqN3itPQ-GzotVtR_eQc7g9FynbzQ"  # ⚠️ Não compartilhe publicamente
 CHAT_ID = "1093248456"
 
 bot = telegram.Bot(token=TOKEN)
@@ -37,17 +37,29 @@ def check_arbitrage():
             time.sleep(5)
             continue
 
+        # Binance -> KuCoin
         if k_bid - b_ask > 0:
             lucro = (k_bid - b_ask) / b_ask * 100
             if lucro > 1:
-                msg = f"💰 Arbitragem detectada!\nComprar na Binance a {b_ask}\nVender na KuCoin a {k_bid}\nLucro estimado: {lucro:.2f}%"
+                msg = (
+                    f"💰 Arbitragem detectada!\n"
+                    f"Comprar na Binance a {b_ask}\n"
+                    f"Vender na KuCoin a {k_bid}\n"
+                    f"Lucro estimado: {lucro:.2f}%"
+                )
                 print(msg)
                 bot.send_message(chat_id=CHAT_ID, text=msg)
 
+        # KuCoin -> Binance
         if b_bid - k_ask > 0:
             lucro = (b_bid - k_ask) / k_ask * 100
             if lucro > 1:
-                msg = f"💰 Arbitragem detectada!\nComprar na KuCoin a {k_ask}\nVender na Binance a {b_bid}\nLucro estimado: {lucro:.2f}%"
+                msg = (
+                    f"💰 Arbitragem detectada!\n"
+                    f"Comprar na KuCoin a {k_ask}\n"
+                    f"Vender na Binance a {b_bid}\n"
+                    f"Lucro estimado: {lucro:.2f}%"
+                )
                 print(msg)
                 bot.send_message(chat_id=CHAT_ID, text=msg)
 
