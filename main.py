@@ -1,5 +1,12 @@
 import requests
 import time
+import telegram
+
+# Configuração do bot Telegram
+TOKEN = "7218062934:AAEcgNpqN3itPQ-GzotVtR_eQc7g9FynbzQ"  # ⚠️ Mantenha privado
+CHAT_ID = "1093248456"
+
+bot = telegram.Bot(token=TOKEN)
 
 def get_binance_price(symbol="BTCUSDT"):
     try:
@@ -33,12 +40,16 @@ def check_arbitrage():
         if k_bid - b_ask > 0:
             lucro = (k_bid - b_ask) / b_ask * 100
             if lucro > 1:
-                print(f"💰 Arbitragem: Comprar na Binance a {b_ask}, vender na KuCoin a {k_bid} | Lucro: {lucro:.2f}%")
+                msg = f"💰 Arbitragem detectada!\nComprar na Binance a {b_ask}\nVender na KuCoin a {k_bid}\nLucro estimado: {lucro:.2f}%"
+                print(msg)
+                bot.send_message(chat_id=CHAT_ID, text=msg)
 
         if b_bid - k_ask > 0:
             lucro = (b_bid - k_ask) / k_ask * 100
             if lucro > 1:
-                print(f"💰 Arbitragem: Comprar na KuCoin a {k_ask}, vender na Binance a {b_bid} | Lucro: {lucro:.2f}%")
+                msg = f"💰 Arbitragem detectada!\nComprar na KuCoin a {k_ask}\nVender na Binance a {b_bid}\nLucro estimado: {lucro:.2f}%"
+                print(msg)
+                bot.send_message(chat_id=CHAT_ID, text=msg)
 
         time.sleep(10)
 
