@@ -3,7 +3,7 @@ import time
 from telegram import Bot
 
 # Configuração do bot Telegram
-TOKEN = "7218062934:AAEcgNpqN3itPQ-GzotVtR_eQc7g9FynbzQ"  # ⚠️ Nunca compartilhe esse token publicamente!
+TOKEN = "7218062934:AAEcgNpqN3itPQ-GzotVtR_eQc7g9FynbzQ"  # ⚠️ Troque esse token imediatamente, pois foi exposto publicamente
 CHAT_ID = "1093248456"
 
 bot = Bot(token=TOKEN)
@@ -66,4 +66,4 @@ def check_arbitrage():
         time.sleep(10)
 
 if __name__ == "__main__":
-    check_arbitrage 
+    check_arbitrage()
