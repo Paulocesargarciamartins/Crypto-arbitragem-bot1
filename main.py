@@ -3,7 +3,8 @@ import time
 from telegram import Bot
 
 # Configuração do bot Telegram
-TOKEN = "7218062934:AAFokGnqbOozHMLEB63IsTjxA8uZhfBoZj8"  # novo token seguro
+import os
+TOKEN = os.getenv("TOKEN")
 CHAT_ID = "1093248456"
 
 bot = Bot(token=TOKEN)
