@@ -1,4 +1,4 @@
-import requests
+oimport requests
 import time
 import telegram
 
@@ -66,5 +66,4 @@ def check_arbitrage():
         time.sleep(10)
 
 if __name__ == "__main__":
-    check_arbitrage()
-test.
+    check_arbitrage 
