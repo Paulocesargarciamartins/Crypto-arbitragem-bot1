@@ -3,7 +3,7 @@ import time
 from telegram import Bot
 
 # Configuração do bot Telegram
-TOKEN = "7218062934:AAEcgNpqN3itPQ-GzotVtR_eQc7g9FynbzQ"  # ⚠️ Troque esse token imediatamente, pois foi exposto publicamente
+TOKEN = "7218062934:AAFokGnqbOozHMLEB63IsTjxA8uZhfBoZj8"  # novo token seguro
 CHAT_ID = "1093248456"
 
 bot = Bot(token=TOKEN)
@@ -28,6 +28,7 @@ def get_kucoin_price(symbol="BTC-USDT"):
         return None, None
 
 def check_arbitrage():
+    print("Bot iniciado!")
     while True:
         b_bid, b_ask = get_binance_price()
         k_bid, k_ask = get_kucoin_price()
