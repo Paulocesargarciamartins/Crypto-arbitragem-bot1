@@ -2,155 +2,78 @@ import asyncio
 import aiohttp
 import telegram
 
-TOKEN = 'SEU_TOKEN_AQUI'
-CHAT_ID = 'SEU_CHAT_ID_AQUI'
+# Configurações do Telegram
+TOKEN = '7218062934:AAFokGnqbOozHMLEB63IsTjxA8uZhfBoZj8'
+CHAT_ID = '1093248456'
 
-pares = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT',
-         'ADA/USDT', 'AVAX/USDT', 'DOGE/USDT', 'DOT/USDT', 'MATIC/USDT',
-         'TRX/USDT', 'LINK/USDT', 'LTC/USDT', 'ATOM/USDT', 'SHIB/USDT',
-         'ETC/USDT', 'OP/USDT', 'UNI/USDT', 'NEAR/USDT', 'APE/USDT']
+# Lista de casas de apostas simuladas
+casas = ["Binance", "Coinbase", "Kraken", "OKX", "Kucoin", "Bybit", "Gate.io"]
 
-exchanges = {
-    "binance": "https://api.binance.com/api/v3/ticker/price?symbol={}",
-    "kucoin": "https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={}",
-    "bitget": "https://api.bitget.com/api/spot/v1/market/ticker?symbol={}",
-    "bybit": "https://api.bybit.com/v2/public/tickers?symbol={}",
-    "mexc": "https://api.mexc.com/api/v3/ticker/price?symbol={}",
-    "gate": "https://api.gate.io/api2/1/ticker/{}",
-    "poloniex": "https://poloniex.com/public?command=returnTicker",
-    "okx": "https://www.okx.com/api/v5/market/ticker?instId={}",
-    "coinbase": "https://api.exchange.coinbase.com/products/{}/ticker",
-    "huobi": "https://api.huobi.pro/market/detail/merged?symbol={}",
-    "kraken": "https://api.kraken.com/0/public/Ticker?pair={}",
-    "bitstamp": "https://www.bitstamp.net/api/v2/ticker/{}",
-    "bittrex": "https://api.bittrex.com/v3/markets/{}/ticker",
-    "crypto": "https://api.crypto.com/v2/public/get-ticker?instrument_name={}"
-}
+# Lista de criptomoedas simuladas
+moedas = ["BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "DOGE"]
 
-async def fetch_price(session, url, exchange, par):
-    try:
-        if exchange == "binance":
-            symbol = par.replace("/", "")
-            r = await session.get(url.format(symbol))
-            data = await r.json()
-            return float(data['price'])
+# Simulação de odds (preços) diferentes
+async def buscar_precos():
+    precos = {}
+    async with aiohttp.ClientSession() as session:
+        for casa in casas:
+            precos[casa] = {}
+            for moeda in moedas:
+                # Simulando preço aleatório para teste (depois pode ser trocado por API real)
+                async with session.get(f'https://api.coingecko.com/api/v3/simple/price?ids={moeda.lower()}&vs_currencies=usd') as resp:
+                    data = await resp.json()
+                    preco = data.get(moeda.lower(), {}).get("usd", 0)
+                    if preco == 0:
+                        preco = 100.0
+                    precos[casa][moeda] = preco * (1 + (0.01 * casas.index(casa)))  # Simula variação por casa
+    return precos
 
-        elif exchange == "kucoin":
-            symbol = par.replace("/", "-")
-            r = await session.get(url.format(symbol))
-            data = await r.json()
-            return float(data['data']['price'])
+# Verifica arbitragem
+def detectar_arbitragem(precos):
+    oportunidades = []
+    for moeda in moedas:
+        menor_preco = min(precos[casa][moeda] for casa in casas)
+        maior_preco = max(precos[casa][moeda] for casa in casas)
+        lucro = (maior_preco - menor_preco) / menor_preco * 100
+        if lucro > 1.5:
+            casa_compra = [c for c in casas if precos[c][moeda] == menor_preco][0]
+            casa_venda = [c for c in casas if precos[c][moeda] == maior_preco][0]
+            oportunidades.append({
+                "moeda": moeda,
+                "lucro": round(lucro, 2),
+                "comprar_em": casa_compra,
+                "vender_em": casa_venda,
+                "preco_compra": round(menor_preco, 2),
+                "preco_venda": round(maior_preco, 2)
+            })
+    return oportunidades
 
-        elif exchange == "bitget":
-            symbol = par.replace("/", "")
-            r = await session.get(url.format(symbol))
-            data = await r.json()
-            return float(data['data']['close'])
-
-        elif exchange == "bybit":
-            symbol = par.replace("/", "")
-            r = await session.get(url.format(symbol))
-            data = await r.json()
-            return float(data['result'][0]['last_price'])
-
-        elif exchange == "mexc":
-            symbol = par.replace("/", "")
-            r = await session.get(url.format(symbol))
-            data = await r.json()
-            return float(data['price'])
-
-        elif exchange == "gate":
-            symbol = par.replace("/", "_").lower()
-            r = await session.get(url.format(symbol))
-            data = await r.json()
-            return float(data['last'])
-
-        elif exchange == "poloniex":
-            symbol = par.replace("/", "_").upper()
-            r = await session.get(url)
-            data = await r.json()
-            return float(data[symbol]['last'])
-
-        elif exchange == "okx":
-            symbol = par.replace("/", "-").upper()
-            r = await session.get(url.format(symbol))
-            data = await r.json()
-            return float(data['data'][0]['last'])
-
-        elif exchange == "coinbase":
-            symbol = par.replace("/", "-")
-            r = await session.get(url.format(symbol))
-            data = await r.json()
-            return float(data['price'])
-
-        elif exchange == "huobi":
-            symbol = par.replace("/", "").lower()
-            r = await session.get(url.format(symbol))
-            data = await r.json()
-            return float(data['tick']['close'])
-
-        elif exchange == "kraken":
-            symbol = par.replace("/", "")
-            if symbol == "BTCUSDT":
-                symbol = "XBTUSDT"
-            r = await session.get(url.format(symbol))
-            data = await r.json()
-            key = list(data['result'].keys())[0]
-            return float(data['result'][key]['c'][0])
-
-        elif exchange == "bitstamp":
-            symbol = par.replace("/", "").lower()
-            r = await session.get(url.format(symbol))
-            data = await r.json()
-            return float(data['last'])
-
-        elif exchange == "bittrex":
-            symbol = par.replace("/", "-")
-            r = await session.get(url.format(symbol))
-            data = await r.json()
-            return float(data['lastTradeRate'])
-
-        elif exchange == "crypto":
-            symbol = par.replace("/", "_")
-            r = await session.get(url.format(symbol))
-            data = await r.json()
-            return float(data['result']['data']['a'])
-
-    except:
-        return None
-
-async def monitorar_arbitragem():
+# Envia alerta para o Telegram
+async def enviar_telegram(oportunidades):
+    if not oportunidades:
+        return
     bot = telegram.Bot(token=TOKEN)
-    await bot.send_message(chat_id=CHAT_ID, text="🔁 Bot de arbitragem iniciado!")
+    for opp in oportunidades:
+        msg = (
+            f"🚨 *Oportunidade de Arbitragem Cripto!*\n\n"
+            f"💰 Moeda: *{opp['moeda']}*\n"
+            f"🔽 Comprar em: *{opp['comprar_em']}* a ${opp['preco_compra']}\n"
+            f"🔼 Vender em: *{opp['vender_em']}* a ${opp['preco_venda']}\n"
+            f"📈 Lucro estimado: *{opp['lucro']}%*\n"
+        )
+        await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode=telegram.constants.ParseMode.MARKDOWN)
 
+# Loop principal
+async def main():
     while True:
-        async with aiohttp.ClientSession() as session:
-            for par in pares:
-                tasks = [fetch_price(session, url, exchange, par) for exchange, url in exchanges.items()]
-                prices = await asyncio.gather(*tasks)
-                mercado = {}
+        try:
+            precos = await buscar_precos()
+            oportunidades = detectar_arbitragem(precos)
+            await enviar_telegram(oportunidades)
+            await asyncio.sleep(60)  # Espera 1 minuto entre cada verificação
+        except Exception as e:
+            print(f"Erro: {e}")
+            await asyncio.sleep(30)
 
-                for i, exchange in enumerate(exchanges.keys()):
-                    if prices[i]:
-                        mercado[exchange] = prices[i]
-
-                if len(mercado) >= 2:
-                    maior = max(mercado, key=mercado.get)
-                    menor = min(mercado, key=mercado.get)
-                    preco_maior = mercado[maior]
-                    preco_menor = mercado[menor]
-                    dif = preco_maior - preco_menor
-                    perc = (dif / preco_menor) * 100
-
-                    if perc >= 0.5:  # Ajuste conforme desejado
-                        msg = (
-                            f"💸 Arbitragem encontrada: {par}\n\n"
-                            f"🔼 Maior preço: {maior} - ${preco_maior:.2f}\n"
-                            f"🔽 Menor preço: {menor} - ${preco_menor:.2f}\n"
-                            f"📊 Diferença: ${dif:.2f} ({perc:.2f}%)"
-                        )
-                        await bot.send_message(chat_id=CHAT_ID, text=msg)
-
-        await asyncio.sleep(60)
-
-asyncio.run(monitorar_arbitragem())
+if __name__ == "__main__":
+    asyncio.run(main())
