@@ -1,4 +1,4 @@
-oimport requests
+import requests
 import time
 import telegram
 
