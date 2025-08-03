@@ -1,71 +1,104 @@
-import requests
-import time
-from telegram import Bot
-
-# Configuração do bot Telegram
 import os
-TOKEN = os.getenv("TOKEN")
-CHAT_ID = "1093248456"
+import asyncio
+import aiohttp
+import logging
+import telegram
+from datetime import datetime
 
-bot = Bot(token=TOKEN)
+# ========================
+# CONFIGURAÇÕES PRINCIPAIS
+# ========================
+TOKEN = os.getenv("TELEGRAM_TOKEN") or "SEU_TOKEN_AQUI"
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or "SEU_CHAT_ID"
+LUCRO_MINIMO = 0.05  # 5%
+MOEDA = "USDT"
 
-def get_binance_price(symbol="BTCUSDT"):
+EXCHANGES = {
+    "binance": "https://api.binance.com/api/v3/ticker/price?symbol={par}",
+    "coinbase": "https://api.coinbase.com/v2/prices/{par}/spot",
+    "bitfinex": "https://api-pub.bitfinex.com/v2/ticker/t{par}",
+}
+
+# ========================
+# FUNÇÃO DE ALERTA TELEGRAM
+# ========================
+async def enviar_telegram(mensagem: str):
     try:
-        url = f"https://api.binance.com/api/v3/ticker/bookTicker?symbol={symbol}"
-        response = requests.get(url).json()
-        return float(response["bidPrice"]), float(response["askPrice"])
+        bot = telegram.Bot(token=TOKEN)
+        await bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode="HTML")
     except Exception as e:
-        print("Erro Binance:", e)
-        return None, None
+        logging.error(f"Erro ao enviar mensagem no Telegram: {e}")
 
-def get_kucoin_price(symbol="BTC-USDT"):
+# ========================
+# FUNÇÃO DE CONSULTA EM CADA EXCHANGE
+# ========================
+async def buscar_preco(session, nome, par):
     try:
-        url = f"https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={symbol}"
-        response = requests.get(url).json()
-        data = response["data"]
-        return float(data["bestBid"]), float(data["bestAsk"])
+        if nome == "binance":
+            url = EXCHANGES[nome].format(par=par.replace("/", "")).upper()
+            async with session.get(url) as r:
+                json = await r.json()
+                return float(json["price"])
+        elif nome == "coinbase":
+            url = EXCHANGES[nome].format(par=par)
+            async with session.get(url) as r:
+                json = await r.json()
+                return float(json["data"]["amount"])
+        elif nome == "bitfinex":
+            url = EXCHANGES[nome].format(par=par.replace("/", "")).upper()
+            async with session.get(url) as r:
+                json = await r.json()
+                return float(json[6])
     except Exception as e:
-        print("Erro KuCoin:", e)
-        return None, None
+        await enviar_telegram(f"⚠️ Erro ao consultar {nome}: {e}")
+        return None
 
-def check_arbitrage():
-    print("Bot iniciado!")
+# ========================
+# FUNÇÃO DE ANÁLISE DE ARBITRAGEM
+# ========================
+async def verificar_arbitragem():
+    pares = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "ADA/USDT", "XRP/USDT"]
+    async with aiohttp.ClientSession() as session:
+        for par in pares:
+            precos = {}
+            for nome in EXCHANGES:
+                preco = await buscar_preco(session, nome, par)
+                if preco:
+                    precos[nome] = preco
+
+            if len(precos) < 2:
+                continue
+
+            menor_exchange = min(precos, key=precos.get)
+            maior_exchange = max(precos, key=precos.get)
+            menor = precos[menor_exchange]
+            maior = precos[maior_exchange]
+            lucro = (maior - menor) / menor
+
+            if lucro >= LUCRO_MINIMO:
+                msg = (
+                    f"💸 <b>ARBITRAGEM ENCONTRADA</b>\n\n"
+                    f"🪙 Moeda: <b>{par}</b>\n"
+                    f"🔻 Comprar: {menor_exchange} - <b>${menor:.2f}</b>\n"
+                    f"🔺 Vender: {maior_exchange} - <b>${maior:.2f}</b>\n"
+                    f"📈 Lucro estimado: <b>{lucro*100:.2f}%</b>\n"
+                    f"⏱ {datetime.utcnow().strftime('%H:%M:%S')} UTC"
+                )
+                await enviar_telegram(msg)
+
+# ========================
+# FUNÇÃO PRINCIPAL DE LOOP
+# ========================
+async def main():
     while True:
-        b_bid, b_ask = get_binance_price()
-        k_bid, k_ask = get_kucoin_price()
+        try:
+            await verificar_arbitragem()
+        except Exception as e:
+            await enviar_telegram(f"❌ Erro inesperado no bot: {e}")
+        await asyncio.sleep(60)  # aguarda 60 segundos entre as verificações
 
-        if None in [b_bid, b_ask, k_bid, k_ask]:
-            print("Erro ao buscar dados.")
-            time.sleep(5)
-            continue
-
-        # Binance -> KuCoin
-        if k_bid - b_ask > 0:
-            lucro = (k_bid - b_ask) / b_ask * 100
-            if lucro > 1:
-                msg = (
-                    f"💰 Arbitragem detectada!\n"
-                    f"Comprar na Binance a {b_ask}\n"
-                    f"Vender na KuCoin a {k_bid}\n"
-                    f"Lucro estimado: {lucro:.2f}%"
-                )
-                print(msg)
-                bot.send_message(chat_id=CHAT_ID, text=msg)
-
-        # KuCoin -> Binance
-        if b_bid - k_ask > 0:
-            lucro = (b_bid - k_ask) / k_ask * 100
-            if lucro > 1:
-                msg = (
-                    f"💰 Arbitragem detectada!\n"
-                    f"Comprar na KuCoin a {k_ask}\n"
-                    f"Vender na Binance a {b_bid}\n"
-                    f"Lucro estimado: {lucro:.2f}%"
-                )
-                print(msg)
-                bot.send_message(chat_id=CHAT_ID, text=msg)
-
-        time.sleep(10)
-
+# ========================
+# EXECUÇÃO
+# ========================
 if __name__ == "__main__":
-    check_arbitrage()
+    asyncio.run(main())
