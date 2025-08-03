@@ -2,9 +2,28 @@ import asyncio
 import aiohttp
 from telegram import Bot
 from telegram.error import TelegramError
+import os
+import time
+
+# --- CÓDIGO DO SERVIDOR WEB (adicionado) ---
+from flask import Flask
+from threading import Thread
+
+app = Flask(__name__)
+
+# Esta função cria a página web que o Heroku vai exibir.
+@app.route('/')
+def index():
+    return "O bot de alertas de cripto está online e funcionando!"
+
+def run_server():
+    # O Heroku define a porta pela variável de ambiente PORT
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
+
+# --- FIM DO CÓDIGO DO SERVIDOR WEB ---
 
 # Configurações do bot (já configuradas via VARS de ambiente no Heroku)
-import os
 TELEGRAM_TOKEN = os.getenv('TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('CHAT_ID')
 
@@ -26,8 +45,6 @@ PAIRS = [
 LUCRO_MINIMO = 0.05  # 5% lucro mínimo para alertar
 
 API_URLS = {
-    # Exemplo de API pública para cada exchange, se houver
-    # Aqui vou usar um padrão fictício só pra ilustrar
     'binance': 'https://api.binance.com/api/v3/ticker/price?symbol={symbol}',
     'kucoin': 'https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={symbol}',
     'bitget': 'https://api.bitget.com/api/spot/v1/market/ticker?symbol={symbol}',
@@ -44,10 +61,7 @@ API_URLS = {
     'gemini': 'https://api.gemini.com/v1/pubticker/{symbol}'
 }
 
-# Função para padronizar símbolos para cada exchange (simplificada)
 def normalize_symbol(exchange, pair):
-    # Em geral, troca "USDT" por "USDT" ou "USD" dependendo da exchange
-    # Aqui só um exemplo básico para manter igual
     return pair
 
 async def fetch_price(session, exchange, symbol):
@@ -56,7 +70,6 @@ async def fetch_price(session, exchange, symbol):
         return None
     try:
         if exchange == 'poloniex':
-            # Poloniex retorna todos, tratar separado
             async with session.get(url) as resp:
                 data = await resp.json()
                 ticker = data.get(symbol.lower())
@@ -67,7 +80,6 @@ async def fetch_price(session, exchange, symbol):
             api_url = url.format(symbol=symbol)
             async with session.get(api_url) as resp:
                 data = await resp.json()
-                # Parse padrão para diferentes exchanges:
                 if exchange == 'binance':
                     return float(data['price'])
                 elif exchange == 'kucoin':
@@ -87,7 +99,6 @@ async def fetch_price(session, exchange, symbol):
                 elif exchange == 'okx':
                     return float(data['data'][0]['last'])
                 elif exchange == 'kraken':
-                    # Kraken tem par diferente, pode precisar ajustar
                     pair_key = list(data['result'].keys())[0]
                     return float(data['result'][pair_key]['c'][0])
                 elif exchange == 'coinbase':
@@ -131,10 +142,18 @@ async def check_arbitrage():
                 except TelegramError as e:
                     print("Erro ao enviar mensagem:", e)
 
-async def main():
+# A função `main` do seu código agora é o nosso "worker"
+async def run_bot_loop():
     while True:
         await check_arbitrage()
-        await asyncio.sleep(30)  # intervalo de 30 segundos
+        await asyncio.sleep(30)
 
+# --- EXECUÇÃO PRINCIPAL ---
 if __name__ == '__main__':
-    asyncio.run(main())
+    # Inicia o servidor web em uma thread separada para não bloquear o bot
+    server_thread = Thread(target=run_server)
+    server_thread.start()
+
+    # Inicia o loop do bot na thread principal
+    asyncio.run(run_bot_loop())
+
