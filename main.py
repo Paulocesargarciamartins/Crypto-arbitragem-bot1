@@ -1,71 +1,89 @@
+import os
 import asyncio
 import aiohttp
-import telegram
+from telegram import Bot
 
-TOKEN = '7218062934:AAEcgNpqN3itPQ-GzotVtR_eQc7g9FynbzQ'
-CHAT_ID = '1093248456'
-PROFIT_THRESHOLD = 0.05  # 5% de lucro mínimo
-
+# Configurações (exchanges e pares)
 EXCHANGES = [
-    'binance', 'kraken', 'coinbase', 'kucoin', 'bitstamp',
-    'bitfinex', 'mexc', 'gate', 'huobi', 'okx',
-    'bitget', 'bybit', 'bitmart', 'poloniex'
+    "binance", "kucoin", "bitget", "bybit", "mexc", "gate", "poloniex",
+    "huobi", "okx", "kraken", "bitfinex", "bittrex", "ftx", "coinbase"
 ]
 
+# 20 pares mais líquidos exemplo — adapte se quiser (os mais comuns)
 PAIRS = [
-    'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'XRP/USDT',
-    'ADA/USDT', 'SOL/USDT', 'DOGE/USDT', 'AVAX/USDT',
-    'TRX/USDT', 'LINK/USDT', 'DOT/USDT', 'MATIC/USDT',
-    'SHIB/USDT', 'LTC/USDT', 'BCH/USDT', 'XLM/USDT',
-    'UNI/USDT', 'ATOM/USDT', 'ETC/USDT', 'TON/USDT'
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT", "SOLUSDT",
+    "DOGEUSDT", "DOTUSDT", "LTCUSDT", "AVAXUSDT", "SHIBUSDT", "MATICUSDT",
+    "ATOMUSDT", "LINKUSDT", "TRXUSDT", "ETCUSDT", "XLMUSDT", "NEARUSDT",
+    "ALGOUSDT", "VETUSDT"
 ]
 
-bot = telegram.Bot(token=TOKEN)
+# Lucro mínimo para alertar (em %)
+MIN_PROFIT = 5.0
 
-async def fetch_ticker(session, exchange, symbol):
-    url = f'https://api.ccxt.pro/{exchange}/ticker?symbol={symbol}'
+# Função para pegar preços das exchanges (exemplo simplificado)
+async def fetch_price(session, exchange, pair):
+    # Aqui você deve colocar o endpoint real da API de cada exchange e adaptar.
+    # Esse exemplo usa uma URL genérica, você precisa adaptar para cada exchange.
+    url = f"https://api.{exchange}.com/api/v3/ticker/price?symbol={pair}"
     try:
-        async with session.get(url, timeout=10) as response:
-            return await response.json()
+        async with session.get(url, timeout=5) as resp:
+            data = await resp.json()
+            price = float(data.get("price", 0))
+            return price
     except Exception:
         return None
 
-async def verificar_arbitragem():
+# Função para buscar preços para todos pares e exchanges
+async def fetch_all_prices():
+    prices = {}  # {pair: {exchange: price}}
     async with aiohttp.ClientSession() as session:
         for pair in PAIRS:
-            preços = []
-            for ex in EXCHANGES:
-                symbol = pair.replace("/", "")
-                url = f'https://api.binance.com/api/v3/ticker/price?symbol={symbol}'
-                try:
-                    async with session.get(url) as resp:
-                        data = await resp.json()
-                        preço = float(data['price'])
-                        preços.append((ex, preço))
-                except:
-                    continue
+            prices[pair] = {}
+            tasks = [fetch_price(session, ex, pair) for ex in EXCHANGES]
+            results = await asyncio.gather(*tasks)
+            for ex, price in zip(EXCHANGES, results):
+                if price:
+                    prices[pair][ex] = price
+    return prices
 
-            if len(preços) < 2:
-                continue
+# Função para detectar arbitragem e enviar alerta Telegram
+async def check_arbitrage_and_alert(bot):
+    prices = await fetch_all_prices()
+    for pair, ex_prices in prices.items():
+        if len(ex_prices) < 2:
+            continue  # Precisa de pelo menos 2 exchanges com preço
 
-            menor = min(preços, key=lambda x: x[1])
-            maior = max(preços, key=lambda x: x[1])
-            lucro = (maior[1] - menor[1]) / menor[1]
+        # Encontrar menor e maior preço e as exchanges correspondentes
+        min_ex, min_price = min(ex_prices.items(), key=lambda x: x[1])
+        max_ex, max_price = max(ex_prices.items(), key=lambda x: x[1])
 
-            if lucro >= PROFIT_THRESHOLD:
-                mensagem = (
-                    f'💰 *Arbitragem encontrada!*\n\n'
-                    f'Par: `{pair}`\n\n'
-                    f'🔻 Comprar em: `{menor[0]}` a *{menor[1]:.2f}*\n'
-                    f'🔺 Vender em: `{maior[0]}` a *{maior[1]:.2f}*\n\n'
-                    f'📈 Lucro estimado: *{lucro * 100:.2f}%*'
-                )
-                await bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode='Markdown')
+        # Calcular lucro percentual
+        profit = ((max_price - min_price) / min_price) * 100
+
+        if profit >= MIN_PROFIT:
+            message = (
+                "🚨 Oportunidade de Arbitragem Cripto!\n\n"
+                f"💰 Moeda: {pair.replace('USDT','')}\n"
+                f"🔽 Comprar em: {min_ex.capitalize()} a ${min_price:.2f}\n"
+                f"🔼 Vender em: {max_ex.capitalize()} a ${max_price:.2f}\n"
+                f"📈 Lucro estimado: {profit:.2f}%"
+            )
+            await bot.send_message(chat_id=os.getenv("CHAT_ID"), text=message)
 
 async def main():
-    while True:
-        await verificar_arbitragem()
-        await asyncio.sleep(30)
+    bot_token = os.getenv("TOKEN")
+    if not bot_token or not os.getenv("CHAT_ID"):
+        print("⚠️ Variáveis TOKEN ou CHAT_ID não configuradas no ambiente!")
+        return
 
-if __name__ == '__main__':
+    bot = Bot(token=bot_token)
+
+    while True:
+        try:
+            await check_arbitrage_and_alert(bot)
+        except Exception as e:
+            print("Erro na verificação:", e)
+        await asyncio.sleep(60)  # Espera 60 segundos entre verificações
+
+if __name__ == "__main__":
     asyncio.run(main())
