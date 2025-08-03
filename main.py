@@ -1,82 +1,99 @@
-import os
-import time
-import requests
-from telegram import Bot
+import asyncio
+import aiohttp
+import telegram
 
-# Pega o token e chat ID do ambiente (variáveis configuradas no Heroku)
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+# Configurações do Telegram
+TELEGRAM_TOKEN = "SEU_TOKEN_AQUI"
+TELEGRAM_CHAT_ID = "SEU_CHAT_ID"
 
-# Checa se as variáveis estão definidas
-if not TOKEN or not CHAT_ID:
-    print("Erro: TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID precisam estar configurados nas variáveis de ambiente!")
-    exit(1)
+# Exchanges e endpoints
+EXCHANGES = {
+    "binance": "https://api.binance.com/api/v3/ticker/price?symbol={}",
+    "bybit": "https://api.bybit.com/v2/public/tickers?symbol={}",
+    "kraken": "https://api.kraken.com/0/public/Ticker?pair={}",
+    "kucoin": "https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={}",
+    "gate": "https://api.gate.io/api2/1/ticker/{}",
+    "okx": "https://www.okx.com/api/v5/market/ticker?instId={}",
+    "bitget": "https://api.bitget.com/api/spot/v1/market/ticker?symbol={}",
+    "bitfinex": "https://api-pub.bitfinex.com/v2/ticker/t{}",
+    "poloniex": "https://poloniex.com/public?command=returnTicker",
+    "mexc": "https://api.mexc.com/api/v3/ticker/price?symbol={}",
+}
 
-bot = Bot(token=TOKEN)
+# Pares de moedas com alta liquidez
+PAIRS = [
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "SOLUSDT",
+    "ADAUSDT", "DOGEUSDT", "AVAXUSDT", "DOTUSDT", "TRXUSDT",
+    "MATICUSDT", "LTCUSDT", "SHIBUSDT", "LINKUSDT", "OPUSDT"
+]
 
-def get_binance_price(symbol="BTCUSDT"):
+# Função para pegar preço em cada exchange
+async def fetch_price(session, exchange, url, pair):
     try:
-        url = f"https://api.binance.com/api/v3/ticker/bookTicker?symbol={symbol}"
-        response = requests.get(url).json()
-        return float(response["bidPrice"]), float(response["askPrice"])
-    except Exception as e:
-        print("Erro Binance:", e)
-        return None, None
+        if exchange == "kraken":
+            pair_map = {"BTCUSDT": "XBTUSDT", "ETHUSDT": "ETHUSDT"}
+            kraken_pair = pair_map.get(pair, pair)
+            async with session.get(url.format(kraken_pair)) as r:
+                data = await r.json()
+                price = list(data["result"].values())[0]["c"][0]
+        elif exchange == "gate":
+            async with session.get(url.format(pair.lower())) as r:
+                data = await r.json()
+                price = data["last"]
+        elif exchange == "okx":
+            async with session.get(url.format(pair)) as r:
+                data = await r.json()
+                price = data["data"][0]["last"]
+        elif exchange == "bitfinex":
+            async with session.get(url.format(pair)) as r:
+                data = await r.json()
+                price = data[6]
+        elif exchange == "poloniex":
+            async with session.get(url) as r:
+                data = await r.json()
+                price = data[pair]["last"]
+        else:
+            async with session.get(url.format(pair)) as r:
+                data = await r.json()
+                price = data["price"]
+        return float(price)
+    except Exception:
+        return None
 
-def get_kucoin_price(symbol="BTC-USDT"):
-    try:
-        url = f"https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={symbol}"
-        response = requests.get(url).json()
-        data = response["data"]
-        return float(data["bestBid"]), float(data["bestAsk"])
-    except Exception as e:
-        print("Erro KuCoin:", e)
-        return None, None
+# Função para comparar preços entre exchanges
+async def buscar_arbitragem():
+    async with aiohttp.ClientSession() as session:
+        for pair in PAIRS:
+            prices = {}
+            for ex, url in EXCHANGES.items():
+                price = await fetch_price(session, ex, url, pair)
+                if price:
+                    prices[ex] = price
+            if len(prices) < 2:
+                continue
+            min_ex = min(prices, key=prices.get)
+            max_ex = max(prices, key=prices.get)
+            min_price = prices[min_ex]
+            max_price = prices[max_ex]
+            lucro = ((max_price - min_price) / min_price) * 100
+            if lucro >= 5:
+                msg = f"💰 Oportunidade de Arbitragem\nPar: {pair}\nComprar: {min_ex} por {min_price:.2f}\nVender: {max_ex} por {max_price:.2f}\nLucro: {lucro:.2f}%"
+                await enviar_telegram(msg)
 
-def check_arbitrage():
+# Enviar mensagem para Telegram
+async def enviar_telegram(msg):
+    bot = telegram.Bot(token=TELEGRAM_TOKEN)
+    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg)
+
+# Loop contínuo
+async def main():
+    print("Bot de arbitragem iniciado!")
     while True:
-        b_bid, b_ask = get_binance_price()
-        k_bid, k_ask = get_kucoin_price()
-
-        if None in [b_bid, b_ask, k_bid, k_ask]:
-            print("Erro ao buscar dados.")
-            time.sleep(10)
-            continue
-
-        # Binance -> KuCoin
-        if k_bid - b_ask > 0:
-            lucro = (k_bid - b_ask) / b_ask * 100
-            if lucro > 1:  # Ajuste lucro mínimo se quiser
-                msg = (
-                    f"💰 Arbitragem detectada!\n"
-                    f"Comprar na Binance a {b_ask}\n"
-                    f"Vender na KuCoin a {k_bid}\n"
-                    f"Lucro estimado: {lucro:.2f}%"
-                )
-                print(msg)
-                try:
-                    bot.send_message(chat_id=CHAT_ID, text=msg)
-                except Exception as e:
-                    print(f"Erro ao enviar mensagem no Telegram: {e}")
-
-        # KuCoin -> Binance
-        if b_bid - k_ask > 0:
-            lucro = (b_bid - k_ask) / k_ask * 100
-            if lucro > 1:
-                msg = (
-                    f"💰 Arbitragem detectada!\n"
-                    f"Comprar na KuCoin a {k_ask}\n"
-                    f"Vender na Binance a {b_bid}\n"
-                    f"Lucro estimado: {lucro:.2f}%"
-                )
-                print(msg)
-                try:
-                    bot.send_message(chat_id=CHAT_ID, text=msg)
-                except Exception as e:
-                    print(f"Erro ao enviar mensagem no Telegram: {e}")
-
-        time.sleep(10)
+        try:
+            await buscar_arbitragem()
+        except Exception as e:
+            print("Erro:", e)
+        await asyncio.sleep(60)
 
 if __name__ == "__main__":
-    print("Bot iniciado!")
-    check_arbitrage()
+    asyncio.run(main())
