@@ -1,128 +1,81 @@
-import asyncio
 import aiohttp
+import asyncio
 import telegram
 
-# Configurações Telegram - substitua com seus dados
-TOKEN = "SEU_TOKEN_AQUI"
-CHAT_ID = "SEU_CHAT_ID_AQUI"
+TOKEN = '7218062934:AAEcgNpqN3itPQ-GzotVtR_eQc7g9FynbzQ'
+CHAT_ID = '1093248456'
+bot = telegram.Bot(token=TOKEN)
 
-# Exchanges com APIs públicas simples (exemplos)
 EXCHANGES = {
-    "binance": "https://api.binance.com/api/v3/ticker/price?symbol={}",
-    "kucoin": "https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={}",
-    "kraken": "https://api.kraken.com/0/public/Ticker?pair={}",
-    "gateio": "https://api.gate.io/api2/1/ticker/{}",
-    "okx": "https://www.okx.com/api/v5/market/ticker?instId={}",
-    "bitfinex": "https://api-pub.bitfinex.com/v2/ticker/t{}",
-    "bitget": "https://api.bitget.com/api/spot/v1/market/ticker?symbol={}",
-    "poloniex": "https://poloniex.com/public?command=returnTicker",
-    "mexc": "https://api.mexc.com/api/v3/ticker/price?symbol={}",
-    "bybit": "https://api.bybit.com/v2/public/tickers?symbol={}"
+    'binance': 'https://api.binance.com/api/v3/ticker/price?symbol=XRPUSDT',
+    'kucoin': 'https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=XRP-USDT',
+    'bitget': 'https://api.bitget.com/api/spot/v1/market/ticker?symbol=XRPUSDT_SPBL',
+    'bybit': 'https://api.bybit.com/v5/market/tickers?category=spot&symbol=XRPUSDT',
+    'mexc': 'https://api.mexc.com/api/v3/ticker/price?symbol=XRPUSDT',
+    'gate': 'https://api.gateio.ws/api/v4/spot/tickers?currency_pair=XRP_USDT',
+    'poloniex': 'https://api.poloniex.com/markets/XRP_USDT/price',
 }
 
-# Pares de moedas - padrão USDT, formato conforme API
-PAIRS = [
-    "BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "SOLUSDT",
-    "ADAUSDT", "DOGEUSDT", "AVAXUSDT", "TRXUSDT", "DOTUSDT",
-    "MATICUSDT", "LTCUSDT", "SHIBUSDT", "LINKUSDT", "OPUSDT"
-]
-
-MIN_PROFIT = 1.0  # percentual mínimo para alertar
-
-async def fetch_price(session, exchange, pair):
+async def fetch_price(session, name, url):
     try:
-        if exchange == "kraken":
-            # Kraken usa pares diferentes (exemplo BTCUSDT = XBTUSDT)
-            kraken_pair = pair.replace("USDT", "USD").replace("BTC", "XBT")
-            url = EXCHANGES[exchange].format(kraken_pair)
-            async with session.get(url) as resp:
-                data = await resp.json()
-                result = data.get("result")
-                if not result:
-                    return None
-                first_key = list(result.keys())[0]
-                price = float(result[first_key]["c"][0])
-                return price
+        async with session.get(url, timeout=10) as response:
+            if response.status != 200:
+                raise ValueError(f"HTTP {response.status}")
+            data = await response.json()
 
-        elif exchange == "poloniex":
-            async with session.get(EXCHANGES[exchange]) as resp:
-                data = await resp.json()
-                price = data.get(pair)
-                if price:
-                    return float(price["last"])
-                return None
+            if name == 'binance' or name == 'mexc':
+                return name, float(data['price'])
 
-        elif exchange == "bitfinex":
-            # Bitfinex formato tBTCUSD
-            symbol = "t" + pair.replace("USDT", "USD")
-            url = EXCHANGES[exchange].format(symbol)
-            async with session.get(url) as resp:
-                data = await resp.json()
-                if isinstance(data, list) and len(data) > 6:
-                    return float(data[6])
-                return None
+            elif name == 'kucoin':
+                return name, float(data['data']['price'])
 
-        else:
-            url = EXCHANGES[exchange].format(pair)
-            async with session.get(url) as resp:
-                data = await resp.json()
-                # Formatos variados, tenta diferentes chaves:
-                if "price" in data:
-                    return float(data["price"])
-                elif "last" in data:
-                    return float(data["last"])
-                elif "data" in data:
-                    # KuCoin por exemplo
-                    if "price" in data["data"]:
-                        return float(data["data"]["price"])
-                    elif "bestAsk" in data["data"]:
-                        return float(data["data"]["bestAsk"])
-                elif isinstance(data, list) and len(data) > 0:
-                    # Bybit retorna lista em 'result'
-                    if "last_price" in data[0]:
-                        return float(data[0]["last_price"])
-                return None
+            elif name == 'bitget':
+                return name, float(data['data']['close'])
+
+            elif name == 'bybit':
+                return name, float(data['result']['list'][0]['lastPrice'])
+
+            elif name == 'gate':
+                return name, float(data[0]['last'])
+
+            elif name == 'poloniex':
+                return name, float(data['price'])
+
     except Exception as e:
-        print(f"Erro ao buscar preço {pair} em {exchange}: {e}")
-        return None
+        print(f"❌ Erro ao buscar preço em {name}: {e}")
+        return name, None
 
-async def check_arbitrage():
-    async with aiohttp.ClientSession() as session:
-        for pair in PAIRS:
-            prices = {}
-            for exchange in EXCHANGES:
-                price = await fetch_price(session, exchange, pair)
-                if price:
-                    prices[exchange] = price
-            if len(prices) < 2:
-                continue
-            min_ex = min(prices, key=prices.get)
-            max_ex = max(prices, key=prices.get)
-            min_price = prices[min_ex]
-            max_price = prices[max_ex]
-            profit = (max_price - min_price) / min_price * 100
-            if profit >= MIN_PROFIT:
-                message = (
-                    f"🚨 *Oportunidade de Arbitragem!*\n"
-                    f"Par: `{pair}`\n"
-                    f"Comprar em: *{min_ex}* a {min_price:.4f}\n"
-                    f"Vender em: *{max_ex}* a {max_price:.4f}\n"
-                    f"Lucro estimado: *{profit:.2f}%*"
-                )
-                await send_telegram(message)
-
-async def send_telegram(message):
-    bot = telegram.Bot(token=TOKEN)
-    try:
-        await bot.send_message(chat_id=CHAT_ID, text=message, parse_mode=telegram.constants.ParseMode.MARKDOWN)
-    except Exception as e:
-        print(f"Erro ao enviar mensagem Telegram: {e}")
-
-async def main():
-    print("Bot de arbitragem iniciado!")
+async def verificar_arbitragem():
     while True:
-        await check_arbitrage()
-        await asyncio.sleep(60)  # aguarda 60 segundos antes de checar de novo
+        async with aiohttp.ClientSession() as session:
+            tasks = [fetch_price(session, name, url) for name, url in EXCHANGES.items()]
+            resultados = await asyncio.gather(*tasks)
 
-if __name__ == "__main__":
-    asyncio.run(main())
+            precos = {nome: preco for nome, preco in resultados if preco is not None}
+
+            if precos:
+                maior = max(precos.items(), key=lambda x: x[1])
+                menor = min(precos.items(), key=lambda x: x[1])
+                diferenca = maior[1] - menor[1]
+                lucro_percentual = (diferenca / menor[1]) * 100
+
+                print(f"\n🟢 Preços: {precos}")
+                print(f"💰 Maior: {maior}")
+                print(f"🔻 Menor: {menor}")
+                print(f"📈 Diferença: {diferenca:.4f} ({lucro_percentual:.2f}%)")
+
+                if lucro_percentual > 1:
+                    msg = (
+                        f"🚨 Oportunidade de arbitragem:\n"
+                        f"🔻 Comprar em {menor[0]} a {menor[1]:.4f}\n"
+                        f"🔺 Vender em {maior[0]} a {maior[1]:.4f}\n"
+                        f"📊 Lucro estimado: {lucro_percentual:.2f}%"
+                    )
+                    await bot.send_message(chat_id=CHAT_ID, text=msg)
+            else:
+                print("Nenhum preço disponível no momento.")
+
+        await asyncio.sleep(30)
+
+if __name__ == '__main__':
+    asyncio.run(verificar_arbitragem())
