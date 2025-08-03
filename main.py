@@ -1,12 +1,12 @@
 import requests
 import time
-import telegram
+from telegram import Bot
 
 # Configuração do bot Telegram
 TOKEN = "7218062934:AAEcgNpqN3itPQ-GzotVtR_eQc7g9FynbzQ"  # ⚠️ Nunca compartilhe esse token publicamente!
 CHAT_ID = "1093248456"
 
-bot = telegram.Bot(token=TOKEN)
+bot = Bot(token=TOKEN)
 
 def get_binance_price(symbol="BTCUSDT"):
     try:
