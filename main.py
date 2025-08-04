@@ -88,7 +88,7 @@ async def exchange(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ Use: /exchange binance coinbase kraken")
 
-# Função principal sem asyncio.run()
+# Inicializa o bot e retorna o app
 async def setup_application():
     app = ApplicationBuilder().token(TOKEN).build()
     monitor = ArbitragemMonitor(app)
@@ -103,9 +103,10 @@ async def setup_application():
     await monitor.start_monitoramento()
     return app
 
-# Entrypoint (sem usar asyncio.run)
+# Entrypoint correto para async no Heroku
 if __name__ == '__main__':
-    # Não usar asyncio.run() para evitar erro de fechamento de loop
-    asyncio.get_event_loop().run_until_complete(
-        setup_application().then(lambda app: app.run_polling())
-                  )
+    async def runner():
+        app = await setup_application()
+        await app.run_polling()
+
+    asyncio.run(runner())
