@@ -1,108 +1,51 @@
+import os
 import asyncio
 import aiohttp
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
-import os
+import telegram
+from telegram import Bot
 
-TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID", "")  # pode deixar em branco ou fixar
+# 🔐 Variáveis de ambiente do Heroku (adicionadas em Config Vars)
+TOKEN = os.getenv("TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
-MIN_PROFIT_PERCENTAGE = 2.0
+if not TOKEN or not CHAT_ID:
+    raise ValueError("TOKEN ou CHAT_ID não está definido nas Config Vars do Heroku.")
 
-EXCHANGES = [
-    "binance", "coinbase", "kucoin", "kraken", "gateio", "bitfinex", "okx",
-    "mexc", "huobi", "bitstamp", "bybit", "bitget", "bittrex", "poloniex"
-]
+bot = Bot(token=TOKEN)
 
-PAIRS = [
-    "BTC/USDT", "ETH/USDT", "XRP/USDT", "LTC/USDT", "SOL/USDT", "ADA/USDT",
-    "AVAX/USDT", "DOGE/USDT", "DOT/USDT", "TRX/USDT", "MATIC/USDT", "LINK/USDT",
-    "BCH/USDT", "XLM/USDT", "UNI/USDT", "ATOM/USDT", "ETC/USDT", "HBAR/USDT",
-    "NEAR/USDT", "VET/USDT", "FIL/USDT", "XTZ/USDT", "EOS/USDT", "THETA/USDT",
-    "ICP/USDT", "AAVE/USDT", "QNT/USDT", "FLOW/USDT", "GRT/USDT", "ALGO/USDT",
-    "SAND/USDT", "MANA/USDT", "EGLD/USDT", "FTM/USDT", "RUNE/USDT", "KAVA/USDT",
-    "1INCH/USDT", "BAT/USDT", "ZRX/USDT", "ENJ/USDT", "SNX/USDT", "COMP/USDT",
-    "YFI/USDT", "LRC/USDT", "OMG/USDT", "CRV/USDT", "BAL/USDT", "ANKR/USDT",
-    "WAVES/USDT", "KSM/USDT", "SRM/USDT", "REN/USDT", "CELR/USDT", "CVC/USDT",
-    "CHZ/USDT", "SKL/USDT", "SXP/USDT", "BNT/USDT", "DGB/USDT", "STMX/USDT",
-    "OCEAN/USDT", "ARDR/USDT", "FET/USDT", "NKN/USDT", "POND/USDT", "MDT/USDT",
-    "BLZ/USDT", "XVS/USDT", "COTI/USDT", "RSR/USDT", "REEF/USDT", "DENT/USDT",
-    "HOT/USDT", "WIN/USDT", "PERL/USDT", "TOMO/USDT", "VITE/USDT", "DOCK/USDT",
-    "NULS/USDT", "CTSI/USDT", "STPT/USDT", "RIF/USDT", "VIDT/USDT", "TRB/USDT",
-    "XEM/USDT", "STRAX/USDT", "LPT/USDT", "MTL/USDT", "CVC/USDT", "POWR/USDT",
-    "AMB/USDT", "FUN/USDT", "TROY/USDT", "MIR/USDT", "FRONT/USDT", "ALPHA/USDT",
-    "ORN/USDT", "UTK/USDT", "FORTH/USDT", "MFT/USDT", "LIT/USDT", "TWT/USDT"
-]
+# 🔁 Lista de pares e exchanges — você pode expandir isso à vontade
+MOEDAS = ['BTC/USDT', 'ETH/USDT', 'LTC/USDT']
+EXCHANGES = ['Binance', 'Coinbase', 'Kraken']
 
+async def buscar_oportunidades():
+    while True:
+        try:
+            texto = "✅ Oportunidade encontrada:\n"
+            for moeda in MOEDAS:
+                for i in range(len(EXCHANGES)):
+                    for j in range(i + 1, len(EXCHANGES)):
+                        ex1 = EXCHANGES[i]
+                        ex2 = EXCHANGES[j]
 
-async def fetch_price(session, exchange, pair):
-    try:
-        url = f"https://api.coingecko.com/api/v3/simple/price?ids={pair.split('/')[0].lower()}&vs_currencies=usd"
-        async with session.get(url) as response:
-            data = await response.json()
-            return data.get(pair.split('/')[0].lower(), {}).get("usd")
-    except:
-        return None
+                        # ⚠️ Exemplo de simulação (substitua pelas suas APIs reais)
+                        preco_ex1 = 100.0  # simulado
+                        preco_ex2 = 105.0  # simulado
+                        lucro_percentual = ((preco_ex2 - preco_ex1) / preco_ex1) * 100
 
+                        if lucro_percentual > 2:
+                            texto += f"\n🔁 {moeda}\n{ex1}: ${preco_ex1:.2f}\n{ex2}: ${preco_ex2:.2f}\nLucro: {lucro_percentual:.2f}%\n"
 
-async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
-    global MIN_PROFIT_PERCENTAGE
-    async with aiohttp.ClientSession() as session:
-        for pair in PAIRS:
-            prices = {}
-            for exchange in EXCHANGES:
-                price = await fetch_price(session, exchange, pair)
-                if price:
-                    prices[exchange] = price
+            if "Lucro" in texto:
+                await bot.send_message(chat_id=CHAT_ID, text=texto)
 
-            if len(prices) >= 2:
-                min_exchange = min(prices, key=prices.get)
-                max_exchange = max(prices, key=prices.get)
-                min_price = prices[min_exchange]
-                max_price = prices[max_exchange]
-                profit_percent = ((max_price - min_price) / min_price) * 100
+        except Exception as e:
+            print(f"Erro ao buscar oportunidades: {e}")
 
-                if profit_percent >= MIN_PROFIT_PERCENTAGE:
-                    message = (
-                        f"💰 Oportunidade de arbitragem!\n"
-                        f"Par: {pair}\n"
-                        f"Comprar em: {min_exchange.upper()} por ${min_price:.2f}\n"
-                        f"Vender em: {max_exchange.upper()} por ${max_price:.2f}\n"
-                        f"Lucro estimado: {profit_percent:.2f}%"
-                    )
-                    await context.bot.send_message(chat_id=CHAT_ID, text=message)
-
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("✅ Bot de arbitragem iniciado! Use /porcentagem X para alterar o lucro mínimo.")
-
-
-async def ajuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Comandos disponíveis:\n/start\n/ajuda\n/porcentagem X")
-
-
-async def set_porcentagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global MIN_PROFIT_PERCENTAGE
-    try:
-        value = float(context.args[0])
-        MIN_PROFIT_PERCENTAGE = value
-        await update.message.reply_text(f"🛠️ Nova margem de lucro definida: {value:.2f}%")
-    except:
-        await update.message.reply_text("Erro. Use o comando assim: /porcentagem 2.5")
-
+        await asyncio.sleep(60)  # ⏱ Intervalo de 1 minuto entre buscas
 
 async def main():
-    app = Application.builder().token(TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("ajuda", ajuda))
-    app.add_handler(CommandHandler("porcentagem", set_porcentagem))
-
-    job_queue = app.job_queue
-    job_queue.run_repeating(check_arbitrage, interval=60, first=10)
-
-    await app.run_polling()
-
+    print("🤖 Bot iniciado...")
+    await buscar_oportunidades()
 
 if __name__ == "__main__":
     asyncio.run(main())
