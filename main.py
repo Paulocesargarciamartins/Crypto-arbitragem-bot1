@@ -1,14 +1,25 @@
 import os
 import asyncio
 import aiohttp
-import telegram
-from dotenv import load_dotenv
+import logging
 
+from dotenv import load_dotenv
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes, JobQueue
+
+# Configuração de Logs
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# Carrega variáveis de ambiente
 load_dotenv()
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-
-bot = telegram.Bot(token=TOKEN)
+PROFIT_PERCENT_THRESHOLD = float(os.getenv("PROFIT_PERCENT_THRESHOLD", 1.0))
+CHECK_INTERVAL_SECONDS = int(os.getenv("CHECK_INTERVAL_SECONDS", 60))
 
 EXCHANGES = [
     'binance', 'bitfinex', 'kraken', 'kucoin', 'coinbase',
@@ -43,27 +54,39 @@ async def get_price(session, exchange, pair):
     try:
         base, quote = pair.split('/')
         url = f'https://api.cryptorank.io/v0/markets/prices?pair={base}{quote}&exchange={exchange}'
-        async with session.get(url) as response:
+        async with session.get(url, timeout=10) as response:
+            response.raise_for_status()
             data = await response.json()
             return data.get('price', None)
-    except:
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        logger.warning(f"Erro ao obter preço de {pair} na exchange {exchange}: {e}")
+        return None
+    except (ValueError, KeyError, IndexError) as e:
+        logger.error(f"Erro ao processar dados de {pair} na exchange {exchange}: {e}")
         return None
 
-async def check_arbitrage():
+async def check_arbitrage_job(context: ContextTypes.DEFAULT_TYPE):
+    logger.info("Iniciando verificação de arbitragem...")
     async with aiohttp.ClientSession() as session:
         for pair in PAIRS:
+            tasks = [get_price(session, exchange, pair) for exchange in EXCHANGES]
+            prices_raw = await asyncio.gather(*tasks)
+
             prices = []
-            for exchange in EXCHANGES:
-                price = await get_price(session, exchange, pair)
-                if price:
-                    prices.append((exchange, price))
+            for i, price in enumerate(prices_raw):
+                if price is not None:
+                    prices.append((EXCHANGES[i], price))
+
             if len(prices) >= 2:
                 min_ex, min_price = min(prices, key=lambda x: x[1])
                 max_ex, max_price = max(prices, key=lambda x: x[1])
+                
                 if min_price == 0:
                     continue
+                
                 profit_percent = ((max_price - min_price) / min_price) * 100
-                if profit_percent >= 1:  # Arbitragem com lucro maior que 1%
+                
+                if profit_percent >= PROFIT_PERCENT_THRESHOLD:
                     msg = (
                         f"📈 Oportunidade de Arbitragem:\n\n"
                         f"Par: {pair}\n"
@@ -71,13 +94,62 @@ async def check_arbitrage():
                         f"Vender em: {max_ex.upper()} a {max_price:.2f}\n"
                         f"Lucro estimado: {profit_percent:.2f}%"
                     )
-                    await bot.send_message(chat_id=CHAT_ID, text=msg)
-                    await asyncio.sleep(1)
+                    await context.bot.send_message(chat_id=CHAT_ID, text=msg)
 
-async def main():
-    while True:
-        await check_arbitrage()
-        await asyncio.sleep(60)  # verifica a cada 60 segundos
+    logger.info("Verificação de arbitragem finalizada.")
+
+# --- Comandos do Telegram ---
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        'Olá! Eu sou o Crypto Arbitragem Bot. Para iniciar as verificações, use o comando /run.'
+    )
+
+async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not any(j.name == 'arbitrage_job' for j in context.job_queue.jobs()):
+        context.job_queue.run_repeating(
+            check_arbitrage_job, 
+            interval=CHECK_INTERVAL_SECONDS, 
+            first=1, 
+            name='arbitrage_job'
+        )
+        await update.message.reply_text(
+            f'Verificação de arbitragem iniciada. Verificando a cada {CHECK_INTERVAL_SECONDS} segundos.'
+        )
+    else:
+        await update.message.reply_text(
+            'A verificação de arbitragem já está em execução.'
+        )
+
+async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    job = context.job_queue.get_jobs_by_name('arbitrage_job')
+    if job:
+        job[0].schedule_removal()
+        await update.message.reply_text('Verificação de arbitragem parada.')
+    else:
+        await update.message.reply_text('A verificação não está em execução.')
+
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    job = context.job_queue.get_jobs_by_name('arbitrage_job')
+    if job:
+        await update.message.reply_text('O bot está ATIVO e verificando arbitragem.')
+    else:
+        await update.message.reply_text('O bot está INATIVO. Use /run para iniciar.')
+
+def main():
+    if not TOKEN or not CHAT_ID:
+        logger.error("TOKEN ou CHAT_ID não estão definidos. Verifique seu arquivo .env")
+        return
+
+    application = Application.builder().token(TOKEN).build()
+    job_queue = application.job_queue
+
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("run", run_command))
+    application.add_handler(CommandHandler("stop", stop_command))
+    application.add_handler(CommandHandler("status", status_command))
+    
+    application.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
