@@ -86,7 +86,11 @@ async def exchange(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ Use: /exchange binance coinbase kraken")
 
-# Entrypoint do app
+# Inicialização do app com função assíncrona correta
+async def post_init(application):
+    monitor = application.bot_data['monitor']
+    await monitor.start_monitoramento()
+
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
     monitor = ArbitragemMonitor(app)
@@ -98,8 +102,8 @@ def main():
     app.add_handler(CommandHandler("moeda", moeda))
     app.add_handler(CommandHandler("exchange", exchange))
 
-    # Inicia o monitoramento junto com o bot
-    app.post_init = lambda _: monitor.start_monitoramento()
+    # ✅ Função post_init corrigida
+    app.post_init = post_init
 
     app.run_polling()
 
