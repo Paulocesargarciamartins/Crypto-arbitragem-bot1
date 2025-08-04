@@ -1,51 +1,76 @@
 import os
 import asyncio
 import aiohttp
-import telegram
 from telegram import Bot
+from dotenv import load_dotenv
 
-# 🔐 Variáveis de ambiente do Heroku (adicionadas em Config Vars)
+load_dotenv()
+
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-if not TOKEN or not CHAT_ID:
-    raise ValueError("TOKEN ou CHAT_ID não está definido nas Config Vars do Heroku.")
+EXCHANGES = [
+    ("https://api.binance.com/api/v3/ticker/price", "symbol", "price", "Binance"),
+    ("https://api.coinbase.com/v2/exchange-rates", "data", "rates", "Coinbase"),
+    # Adicione outras exchanges aqui, se quiser
+]
+
+COINS = ["BTC", "ETH", "LTC", "XRP", "BCH", "ADA", "SOL", "DOT", "AVAX", "DOGE", "TRX", "XLM", "BNB", "MATIC"]
 
 bot = Bot(token=TOKEN)
 
-# 🔁 Lista de pares e exchanges — você pode expandir isso à vontade
-MOEDAS = ['BTC/USDT', 'ETH/USDT', 'LTC/USDT']
-EXCHANGES = ['Binance', 'Coinbase', 'Kraken']
+async def fetch_prices(session, url, base_key, price_key, exchange_name):
+    prices = {}
+    try:
+        async with session.get(url, timeout=10) as response:
+            data = await response.json()
+            for coin in COINS:
+                symbol = f"{coin}USDT"
+                if exchange_name == "Binance":
+                    for item in data:
+                        if item["symbol"] == symbol:
+                            prices[coin] = float(item["price"])
+                elif exchange_name == "Coinbase":
+                    try:
+                        prices[coin] = 1 / float(data["data"]["rates"][coin])
+                    except KeyError:
+                        pass
+    except Exception as e:
+        print(f"Erro na {exchange_name}: {e}")
+    return exchange_name, prices
 
-async def buscar_oportunidades():
+async def comparar():
+    async with aiohttp.ClientSession() as session:
+        results = await asyncio.gather(*(fetch_prices(session, *ex) for ex in EXCHANGES))
+
+        all_prices = {name: prices for name, prices in results}
+        alerts = []
+
+        for coin in COINS:
+            valores = [(exchange, prices.get(coin)) for exchange, prices in all_prices.items() if coin in prices]
+            for i in range(len(valores)):
+                for j in range(i + 1, len(valores)):
+                    (ex1, p1), (ex2, p2) = valores[i], valores[j]
+                    if p1 and p2:
+                        menor, maior = min(p1, p2), max(p1, p2)
+                        lucro = (maior - menor) / menor * 100
+                        if lucro >= 1.0:
+                            alert = f"💰 Arbitragem: {coin}\n{ex1}: ${p1:.2f} | {ex2}: ${p2:.2f}\nLucro: {lucro:.2f}%"
+                            alerts.append(alert)
+
+        if alerts:
+            msg = "\n\n".join(alerts)
+            await bot.send_message(chat_id=CHAT_ID, text=f"🚨 Oportunidades:\n\n{msg}")
+        else:
+            print("Nenhuma arbitragem encontrada no momento.")
+
+async def main_loop():
     while True:
-        try:
-            texto = "✅ Oportunidade encontrada:\n"
-            for moeda in MOEDAS:
-                for i in range(len(EXCHANGES)):
-                    for j in range(i + 1, len(EXCHANGES)):
-                        ex1 = EXCHANGES[i]
-                        ex2 = EXCHANGES[j]
-
-                        # ⚠️ Exemplo de simulação (substitua pelas suas APIs reais)
-                        preco_ex1 = 100.0  # simulado
-                        preco_ex2 = 105.0  # simulado
-                        lucro_percentual = ((preco_ex2 - preco_ex1) / preco_ex1) * 100
-
-                        if lucro_percentual > 2:
-                            texto += f"\n🔁 {moeda}\n{ex1}: ${preco_ex1:.2f}\n{ex2}: ${preco_ex2:.2f}\nLucro: {lucro_percentual:.2f}%\n"
-
-            if "Lucro" in texto:
-                await bot.send_message(chat_id=CHAT_ID, text=texto)
-
-        except Exception as e:
-            print(f"Erro ao buscar oportunidades: {e}")
-
-        await asyncio.sleep(60)  # ⏱ Intervalo de 1 minuto entre buscas
-
-async def main():
-    print("🤖 Bot iniciado...")
-    await buscar_oportunidades()
+        await comparar()
+        await asyncio.sleep(60)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main_loop())
+    except KeyboardInterrupt:
+        print("Bot encerrado.")
