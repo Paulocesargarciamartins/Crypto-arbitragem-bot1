@@ -1,181 +1,78 @@
-import os
 import asyncio
 import aiohttp
 import telegram
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# --- CONFIGURAÇÕES DO BOT TELEGRAM ---
-TELEGRAM_TOKEN = os.getenv('TOKEN')
-TELEGRAM_CHAT_ID = int(os.getenv('CHAT_ID'))
+TOKEN = '7218062934:AAEcgNpqN3itPQ-GzotVtR_eQc7g9FynbzQ'
+CHAT_ID = '1093248456'
+LUCRO_MINIMO = 0.5  # em porcentagem
+PAIRES_MONITORADOS = 100
 
-# --- VARIÁVEIS DE CONTROLE DO BOT ---
-is_running = False
-arbitrage_task = None
-LUCRO_MINIMO = 1.0  # em % (valor padrão)
-
-# --- LISTA DE EXCHANGES (TOP 20) ---
-EXCHANGES = [
-    'binance', 'coinbase', 'kraken', 'bybit', 'okx', 'kucoin',
-    'bitfinex', 'gate.io', 'bitstamp', 'mexc', 'huobi', 'bitget',
-    'poloniex', 'coinex', 'upbit', 'crypto.com', 'gemini', 'lbank',
-    'bithumb', 'phemex'
+# Lista de moedas para monitorar (pode expandir até 100)
+MOEDAS = [
+    'BTC', 'ETH', 'XRP', 'ADA', 'DOGE', 'SOL', 'DOT', 'AVAX', 'TRX', 'MATIC',
+    'LTC', 'LINK', 'BCH', 'UNI', 'ATOM', 'XLM', 'NEAR', 'APE', 'ETC', 'FIL',
+    'EOS', 'XTZ', 'AAVE', 'SUSHI', 'COMP', 'VET', 'HBAR', 'FTM', 'RUNE', 'ZEC', 'MKR',
+    'ALGO', 'SNX', 'CRV', 'ENJ', 'KSM', 'KNC', 'LRC', 'ZRX', 'CHZ', 'ANKR',
+    'BAT', 'OMG', 'DASH', 'QTUM', 'ICX', 'ONT', 'WAVES', 'NANO', 'BNT', 'SC',
+    '1INCH', 'YFI', 'GRT', 'CKB', 'BAND', 'REEF', 'RSR', 'STORJ', 'DGB', 'REN',
+    'SRM', 'CELR', 'CVC', 'ARDR', 'SYS', 'XEM', 'FUN', 'POWR', 'NMR', 'LPT',
+    'RLC', 'STMX', 'XVG', 'SNT', 'OXT', 'ELF', 'NKN', 'POLY', 'STPT', 'TOMO',
+    'TRB', 'REQ', 'BTS', 'STEEM', 'STRAX', 'PERL', 'BLZ', 'MFT', 'DNT', 'PHA',
+    'FORTH', 'ORN', 'DATA', 'UTK', 'DOCK', 'MDT', 'CTSI', 'MIR', 'FET', 'LINA'
 ]
 
-# --- FUNÇÃO: Enviar mensagem para o Telegram ---
-async def enviar_mensagem(mensagem: str):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("Erro: As variáveis de ambiente TOKEN ou CHAT_ID não foram configuradas.")
-        return
-    bot = telegram.Bot(token=TELEGRAM_TOKEN)
-    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=mensagem, parse_mode=telegram.constants.ParseMode.HTML)
+EXCHANGES = {
+    "binance": "https://api.binance.com/api/v3/ticker/price?symbol={}USDT",
+    "gateio": "https://api.gate.io/api2/1/ticker/{}_usdt",
+    "kucoin": "https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={}USDT"
+}
 
-# --- FUNÇÃO: Buscar lista de moedas por ID (usadas nas URLs da CoinGecko) ---
-async def buscar_moedas_liquidas():
-    url = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1"
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(url) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    moedas = [coin['id'] for coin in data]
-                    return moedas
-        except Exception as e:
-            print(f"Erro ao buscar moedas da API: {e}")
-            return []
+bot = telegram.Bot(token=TOKEN)
 
-# --- FUNÇÃO: Buscar preços reais da moeda por exchange ---
-async def buscar_preco_par(session, par):
-    resultados = {}
-    url = f"https://api.coingecko.com/api/v3/coins/{par}/tickers"
+async def pegar_preco(session, exchange, moeda):
+    url = EXCHANGES[exchange].format(moeda.lower() if exchange == "gateio" else moeda.upper())
     try:
-        async with session.get(url) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                for ticker in data.get("tickers", []):
-                    exchange = ticker.get("market", {}).get("name", "").lower()
-                    preco = ticker.get("converted_last", {}).get("usd")
-                    if exchange in EXCHANGES and preco:
-                        resultados[exchange] = preco
+        async with session.get(url, timeout=10) as resp:
+            data = await resp.json()
+            if exchange == "binance":
+                return float(data["price"])
+            elif exchange == "gateio":
+                return float(data["last"])
+            elif exchange == "kucoin":
+                return float(data["price"])
     except Exception as e:
-        print(f"Erro ao buscar preços para {par}: {e}")
-    return resultados
-
-# --- FUNÇÃO: Verificar arbitragem em um par ---
-def encontrar_arbitragem(precos):
-    global LUCRO_MINIMO
-    if not precos:
+        print(f"[ERRO] {exchange.upper()} - {moeda}: {e}")
         return None
-    try:
-        menor = min(precos.items(), key=lambda x: x[1])
-        maior = max(precos.items(), key=lambda x: x[1])
-    except ValueError:
-        return None
-    preco_compra = menor[1]
-    preco_venda = maior[1]
-    if preco_compra == 0:
-        return None
-    lucro_percentual = ((preco_venda - preco_compra) / preco_compra) * 100
-    if lucro_percentual >= LUCRO_MINIMO:
-        return {
-            'compra': menor,
-            'venda': maior,
-            'lucro': round(lucro_percentual, 2)
-        }
-    return None
 
-# --- LOOP PRINCIPAL DE ARBITRAGEM ---
-async def arbitrage_loop():
-    global is_running
-    await enviar_mensagem("🟢 Bot de Arbitragem iniciado.")
-    
-    moedas = await buscar_moedas_liquidas()
-    if not moedas:
-        await enviar_mensagem("❗️ Não foi possível buscar a lista de moedas. O loop será encerrado.")
-        is_running = False
-        return
+async def verificar_oportunidade(session, moeda):
+    precos = {}
+    for exchange in EXCHANGES:
+        preco = await pegar_preco(session, exchange, moeda)
+        if preco:
+            precos[exchange] = preco
 
-    while is_running:
-        try:
-            async with aiohttp.ClientSession() as session:
-                for moeda in moedas:
-                    if not is_running:
-                        break
-                    precos = await buscar_preco_par(session, moeda)
-                    arbitragem = encontrar_arbitragem(precos)
-                    if arbitragem:
-                        msg = (
-                            f"💸 <b>ARBITRAGEM DETECTADA</b>\n\n"
-                            f"🪙 Par: {moeda.upper()}/USD\n"
-                            f"📉 Comprar em: {arbitragem['compra'][0]} por ${arbitragem['compra'][1]:.2f}\n"
-                            f"📈 Vender em: {arbitragem['venda'][0]} por ${arbitragem['venda'][1]:.2f}\n"
-                            f"💰 Lucro: <b>{arbitragem['lucro']}%</b>"
-                        )
-                        await enviar_mensagem(msg)
+    if len(precos) >= 2:
+        maior = max(precos, key=precos.get)
+        menor = min(precos, key=precos.get)
+        preco_maior = precos[maior]
+        preco_menor = precos[menor]
+        lucro_percentual = ((preco_maior - preco_menor) / preco_menor) * 100
 
-            await asyncio.sleep(60)
-        
-        except asyncio.CancelledError:
-            print("Loop de arbitragem cancelado.")
-            break
-        except Exception as e:
-            await enviar_mensagem(f"❗️ Erro no bot durante o loop: {str(e)}")
-            await asyncio.sleep(60)
-            
-    await enviar_mensagem("🔴 Bot de Arbitragem parado.")
+        if lucro_percentual >= LUCRO_MINIMO:
+            mensagem = f"📈 *Arbitragem encontrada!* 💰\n\n" \
+                       f"Moeda: *{moeda}*\n" \
+                       f"Comprar: *{menor.upper()}* a *{preco_menor:.2f} USDT*\n" \
+                       f"Vender: *{maior.upper()}* a *{preco_maior:.2f} USDT*\n" \
+                       f"Lucro: *{lucro_percentual:.2f}%*"
+            await bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode=telegram.constants.ParseMode.MARKDOWN)
 
-# --- COMANDOS DO TELEGRAM ---
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global is_running, arbitrage_task
-    if is_running:
-        await update.message.reply_text("O bot já está rodando.")
-    else:
-        is_running = True
-        arbitrage_task = asyncio.create_task(arbitrage_loop())
-        await update.message.reply_text("Iniciando bot de arbitragem...")
+async def loop_arbitragem():
+    while True:
+        async with aiohttp.ClientSession() as session:
+            tasks = [verificar_oportunidade(session, moeda) for moeda in MOEDAS[:PAIRES_MONITORADOS]]
+            await asyncio.gather(*tasks)
+        await asyncio.sleep(60)  # verifica a cada 1 minuto
 
-async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global is_running, arbitrage_task
-    if not is_running:
-        await update.message.reply_text("O bot já está parado.")
-    else:
-        is_running = False
-        if arbitrage_task:
-            arbitrage_task.cancel()
-        await update.message.reply_text("Parando bot de arbitragem...")
-
-async def setlucro_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global LUCRO_MINIMO
-    try:
-        if not context.args or not len(context.args) == 1:
-            await update.message.reply_text("Uso: /setlucro <valor>")
-            return
-        
-        novo_lucro = float(context.args[0])
-        if novo_lucro <= 0:
-            await update.message.reply_text("O lucro mínimo deve ser um valor positivo.")
-            return
-
-        LUCRO_MINIMO = novo_lucro
-        await update.message.reply_text(f"Lucro mínimo alterado para {LUCRO_MINIMO}%")
-
-    except ValueError:
-        await update.message.reply_text("Por favor, insira um número válido.")
-
-async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global is_running, LUCRO_MINIMO
-    status = "rodando" if is_running else "parado"
-    await update.message.reply_text(f"Status do bot: <b>{status}</b>\nLucro mínimo atual: <b>{LUCRO_MINIMO}%</b>", parse_mode=telegram.constants.ParseMode.HTML)
-
-# --- EXECUÇÃO DO BOT ---
 if __name__ == "__main__":
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("Erro: Variáveis TOKEN ou CHAT_ID não configuradas.")
-    else:
-        application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-        application.add_handler(CommandHandler("start", start_command))
-        application.add_handler(CommandHandler("stop", stop_command))
-        application.add_handler(CommandHandler("setlucro", setlucro_command))
-        application.add_handler(CommandHandler("status", status_command))
-        print("Bot pronto para receber comandos...")
-        application.run_polling()
+    print("Bot iniciado e rodando no Heroku...")
+    asyncio.run(loop_arbitragem())
