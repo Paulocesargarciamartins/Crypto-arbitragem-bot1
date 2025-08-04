@@ -3,7 +3,6 @@ import aiohttp
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# Token do bot e ID do chat
 TOKEN = '7218062934:AAEcgNpqN3itPQ-GzotVtR_eQc7g9FynbzQ'
 CHAT_ID = '1093248456'
 
@@ -21,19 +20,19 @@ class ArbitragemMonitor:
             while self.monitorando:
                 try:
                     oportunidades = []
-                    # Aqui vai a lógica real de arbitragem...
-                    # oportunidades.append("Exemplo de oportunidade...")
+                    # Simulação ou lógica real de arbitragem
+                    # oportunidades.append("Exemplo de oportunidade!")
 
                     if oportunidades:
                         mensagem = "\n".join(oportunidades)
                         await self.application.bot.send_message(chat_id=CHAT_ID, text=mensagem)
-                    
+
                 except asyncio.CancelledError:
-                    print("Tarefa de monitoramento cancelada.")
+                    print("Tarefa cancelada.")
                     break
                 except Exception as e:
-                    print(f"Erro no monitoramento de arbitragem: {e}")
-
+                    print(f"Erro no monitoramento: {e}")
+                
                 await asyncio.sleep(30)
 
     async def start_monitoramento(self):
@@ -50,9 +49,8 @@ class ArbitragemMonitor:
                 await self.arbitragem_task
             except asyncio.CancelledError:
                 pass
-            print("Monitoramento parado.")
 
-# Comandos
+# Comandos do bot
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     monitor = context.bot_data['monitor']
     await monitor.start_monitoramento()
@@ -88,8 +86,8 @@ async def exchange(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ Use: /exchange binance coinbase kraken")
 
-# Inicializa o bot e retorna o app
-async def setup_application():
+# Entrypoint do app
+def main():
     app = ApplicationBuilder().token(TOKEN).build()
     monitor = ArbitragemMonitor(app)
     app.bot_data['monitor'] = monitor
@@ -100,13 +98,10 @@ async def setup_application():
     app.add_handler(CommandHandler("moeda", moeda))
     app.add_handler(CommandHandler("exchange", exchange))
 
-    await monitor.start_monitoramento()
-    return app
+    # Inicia o monitoramento junto com o bot
+    app.post_init = lambda _: monitor.start_monitoramento()
 
-# Entrypoint correto para async no Heroku
+    app.run_polling()
+
 if __name__ == '__main__':
-    async def runner():
-        app = await setup_application()
-        await app.run_polling()
-
-    asyncio.run(runner())
+    main()
