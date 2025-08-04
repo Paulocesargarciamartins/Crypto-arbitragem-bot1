@@ -3,26 +3,17 @@ import aiohttp
 from telegram import Bot
 from telegram.error import TelegramError
 import os
-import time
 
-# --- CÓDIGO DO SERVIDOR WEB (adicionado) ---
 from flask import Flask
-from threading import Thread
 
+# --- CÓDIGO DO SERVIDOR WEB ---
 app = Flask(__name__)
 
-# Esta função cria a página web que o Heroku vai exibir.
 @app.route('/')
 def index():
     return "O bot de alertas de cripto está online e funcionando!"
 
-def run_server():
-    # O Heroku define a porta pela variável de ambiente PORT
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
-
-# --- FIM DO CÓDIGO DO SERVIDOR WEB ---
-
+# --- CÓDIGO DO BOT DE CRIPTO ---
 # Configurações do bot (já configuradas via VARS de ambiente no Heroku)
 TELEGRAM_TOKEN = os.getenv('TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('CHAT_ID')
@@ -142,18 +133,10 @@ async def check_arbitrage():
                 except TelegramError as e:
                     print("Erro ao enviar mensagem:", e)
 
-# A função `main` do seu código agora é o nosso "worker"
-async def run_bot_loop():
+async def worker_loop():
     while True:
         await check_arbitrage()
         await asyncio.sleep(30)
 
-# --- EXECUÇÃO PRINCIPAL ---
 if __name__ == '__main__':
-    # Inicia o servidor web em uma thread separada para não bloquear o bot
-    server_thread = Thread(target=run_server)
-    server_thread.start()
-
-    # Inicia o loop do bot na thread principal
-    asyncio.run(run_bot_loop())
-
+    asyncio.run(worker_loop())
