@@ -3,7 +3,7 @@ import aiohttp
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-TOKEN = '7218062934:AAECGNPQN3ITPQ-GZOTVTR_EQC7G9FYNBZQ 
+TOKEN = '7218062934:AAECGNPQN3ITPQ-GZOTVTR_EQC7G9FYNBZQ'
 CHAT_ID = '1093248456'
 
 class ArbitragemMonitor:
