@@ -1,6 +1,6 @@
-Forcing a full rebuildaiohttp
-python-telegram-bot==20.6
-APScheduler
-Flask
+aiohttp
+python-telegram-bot>=20.0
+apscheduler
+flask
 gunicorn
 python-dotenv
