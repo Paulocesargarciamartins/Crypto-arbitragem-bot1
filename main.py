@@ -6,88 +6,98 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # Token do seu bot Telegram e ID do chat
-# Lembre-se de não expor o token publicamente em produção.
 TOKEN = '7218062934:AAEcgNpqN3itPQ-GzotVtR_eQc7g9FynbzQ'
 CHAT_ID = '1093248456'
 
-# Parâmetros de arbitragem configuráveis
-percentual_lucro = 1.5  # padrão inicial
-moedas_monitoradas = ['BTC', 'ETH', 'LTC']
-exchanges_monitoradas = ['binance', 'coinbase', 'kraken', 'bitstamp']
+class ArbitragemMonitor:
+    def __init__(self, bot):
+        self.bot = bot
+        self.monitorando = True
+        self.percentual_lucro = 1.5
+        self.moedas_monitoradas = ['BTC', 'ETH', 'LTC']
+        self.exchanges_monitoradas = ['binance', 'coinbase', 'kraken', 'bitstamp']
+        self.arbitragem_task = None
 
-# Estado de monitoramento
-monitorando = True
+    async def verificar_arbitragem(self):
+        async with aiohttp.ClientSession() as session:
+            while self.monitorando:
+                try:
+                    oportunidades = []
+                    # Lógica de arbitragem fictícia
+                    # ... (seu código aqui)
 
-# Função para calcular arbitragem fictícia (simulação simplificada)
-async def verificar_arbitragem():
-    async with aiohttp.ClientSession() as session:
-        while monitorando:
-            oportunidades = []
+                    if oportunidades:
+                        mensagem = "\n".join(oportunidades)
+                        await self.bot.send_message(chat_id=CHAT_ID, text=mensagem)
+                    
+                except asyncio.CancelledError:
+                    print("Tarefa de monitoramento cancelada.")
+                    break
+                except Exception as e:
+                    print(f"Erro no monitoramento de arbitragem: {e}")
 
-            for moeda in moedas_monitoradas:
-                for ex1 in exchanges_monitoradas:
-                    for ex2 in exchanges_monitoradas:
-                        if ex1 == ex2:
-                            continue
-                        preco_compra = 100  # Simulado
-                        preco_venda = 100 + percentual_lucro  # Simulado
+                await asyncio.sleep(30)
+    
+    async def start_monitoramento(self):
+        self.monitorando = True
+        if self.arbitragem_task and not self.arbitragem_task.done():
+            return
+        
+        self.arbitragem_task = asyncio.create_task(self.verificar_arbitragem())
 
-                        lucro = preco_venda - preco_compra
-                        percentual = (lucro / preco_compra) * 100
-
-                        if percentual >= percentual_lucro:
-                            oportunidades.append(
-                                f'Arbitragem detectada: {moeda} | Comprar em {ex1} a {preco_compra}, Vender em {ex2} a {preco_venda} | Lucro: {percentual:.2f}%'
-                            )
-
-            if oportunidades:
-                mensagem = "\n".join(oportunidades)
-                await bot.send_message(chat_id=CHAT_ID, text=mensagem)
-
-            await asyncio.sleep(30)
-
-# Bot Telegram (envio e comandos)
-bot = telegram.Bot(token=TOKEN)
+    async def stop_monitoramento(self):
+        self.monitorando = False
+        if self.arbitragem_task:
+            self.arbitragem_task.cancel()
+            try:
+                await self.arbitragem_task
+            except asyncio.CancelledError:
+                pass
+            print("Monitoramento de arbitragem parado.")
 
 # HANDLERS COMANDOS
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global monitorando
-    monitorando = True
+    monitor = context.bot_data['monitor']
+    await monitor.start_monitoramento()
     await update.message.reply_text("✅ Monitoramento iniciado!")
 
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global monitorando
-    monitorando = False
+    monitor = context.bot_data['monitor']
+    await monitor.stop_monitoramento()
     await update.message.reply_text("🛑 Monitoramento parado!")
 
 async def porcentagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global percentual_lucro
+    monitor = context.bot_data['monitor']
     try:
         nova = float(context.args[0])
-        percentual_lucro = nova
+        monitor.percentual_lucro = nova
         await update.message.reply_text(f"✅ Novo percentual de lucro: {nova}%")
-    except:
+    except (ValueError, IndexError):
         await update.message.reply_text("❌ Use: /porcentagem 2.5")
 
 async def moeda(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global moedas_monitoradas
+    monitor = context.bot_data['monitor']
     if context.args:
-        moedas_monitoradas = [moeda.upper() for moeda in context.args]
-        await update.message.reply_text(f"✅ Moedas atualizadas: {', '.join(moedas_monitoradas)}")
+        monitor.moedas_monitoradas = [moeda.upper() for moeda in context.args]
+        await update.message.reply_text(f"✅ Moedas atualizadas: {', '.join(monitor.moedas_monitoradas)}")
     else:
         await update.message.reply_text("❌ Use: /moeda BTC ETH LTC")
 
 async def exchange(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global exchanges_monitoradas
+    monitor = context.bot_data['monitor']
     if context.args:
-        exchanges_monitoradas = [ex.lower() for ex in context.args]
-        await update.message.reply_text(f"✅ Exchanges atualizadas: {', '.join(exchanges_monitoradas)}")
+        monitor.exchanges_monitoradas = [ex.lower() for ex in context.args]
+        await update.message.reply_text(f"✅ Exchanges atualizadas: {', '.join(monitor.exchanges_monitoradas)}")
     else:
         await update.message.reply_text("❌ Use: /exchange binance coinbase kraken")
 
 # Inicialização do bot com comandos
 async def main():
+    bot = telegram.Bot(token=TOKEN)
+    monitor = ArbitragemMonitor(bot)
+    
     app = ApplicationBuilder().token(TOKEN).build()
+    app.bot_data['monitor'] = monitor
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stop", stop))
@@ -95,13 +105,13 @@ async def main():
     app.add_handler(CommandHandler("moeda", moeda))
     app.add_handler(CommandHandler("exchange", exchange))
 
-    # Inicia monitoramento de arbitragem em segundo plano
-    asyncio.create_task(verificar_arbitragem())
-
-    # Executa o bot
-    await app.run_polling()
+    # Inicia o bot e o monitoramento em uma única execução
+    try:
+        await monitor.start_monitoramento()
+        await app.run_polling()
+    finally:
+        await monitor.stop_monitoramento()
 
 # Início
 if __name__ == '__main__':
     asyncio.run(main())
-
