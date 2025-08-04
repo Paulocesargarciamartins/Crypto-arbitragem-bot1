@@ -7,7 +7,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # --- CONFIGURAÇÕES DO BOT TELEGRAM ---
 TELEGRAM_TOKEN = os.getenv('TOKEN')
-TELEGRAM_CHAT_ID = int(os.getenv('CHAT_ID')) # Garante que o CHAT_ID seja um inteiro
+TELEGRAM_CHAT_ID = int(os.getenv('CHAT_ID'))
 
 # --- VARIÁVEIS DE CONTROLE DO BOT ---
 is_running = False
@@ -17,7 +17,7 @@ LUCRO_MINIMO = 1.0  # em % (valor padrão)
 # --- LISTA DE EXCHANGES (TOP 20) ---
 EXCHANGES = [
     'binance', 'coinbase', 'kraken', 'bybit', 'okx', 'kucoin',
-    'bitfinex', 'gate', 'bitstamp', 'mexc', 'huobi', 'bitget',
+    'bitfinex', 'gate.io', 'bitstamp', 'mexc', 'huobi', 'bitget',
     'poloniex', 'coinex', 'upbit', 'crypto.com', 'gemini', 'lbank',
     'bithumb', 'phemex'
 ]
@@ -30,7 +30,7 @@ async def enviar_mensagem(mensagem: str):
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=mensagem, parse_mode=telegram.constants.ParseMode.HTML)
 
-# --- FUNÇÃO: Buscar pares de moedas de alta liquidez ---
+# --- FUNÇÃO: Buscar lista de moedas por ID (usadas nas URLs da CoinGecko) ---
 async def buscar_moedas_liquidas():
     url = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1"
     async with aiohttp.ClientSession() as session:
@@ -38,26 +38,27 @@ async def buscar_moedas_liquidas():
             async with session.get(url) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    moedas = [coin['symbol'].upper() for coin in data]
+                    moedas = [coin['id'] for coin in data]
                     return moedas
         except Exception as e:
             print(f"Erro ao buscar moedas da API: {e}")
             return []
 
-# --- FUNÇÃO: Buscar preços de uma moeda em várias exchanges ---
+# --- FUNÇÃO: Buscar preços reais da moeda por exchange ---
 async def buscar_preco_par(session, par):
     resultados = {}
-    for ex in EXCHANGES:
-        url = f"https://api.coingecko.com/api/v3/simple/price?ids={par.lower()}&vs_currencies=usd&exchange_ids={ex}"
-        try:
-            async with session.get(url) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if par.lower() in data and 'usd' in data[par.lower()]:
-                        resultados[ex] = data[par.lower()]['usd']
-        except Exception as e:
-            print(f"Erro ao buscar preço em {ex}: {e}")
-            continue
+    url = f"https://api.coingecko.com/api/v3/coins/{par}/tickers"
+    try:
+        async with session.get(url) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                for ticker in data.get("tickers", []):
+                    exchange = ticker.get("market", {}).get("name", "").lower()
+                    preco = ticker.get("converted_last", {}).get("usd")
+                    if exchange in EXCHANGES and preco:
+                        resultados[exchange] = preco
+    except Exception as e:
+        print(f"Erro ao buscar preços para {par}: {e}")
     return resultados
 
 # --- FUNÇÃO: Verificar arbitragem em um par ---
@@ -86,7 +87,7 @@ def encontrar_arbitragem(precos):
 # --- LOOP PRINCIPAL DE ARBITRAGEM ---
 async def arbitrage_loop():
     global is_running
-    await enviar_mensagem("🟢 **Bot de Arbitragem iniciado.**")
+    await enviar_mensagem("🟢 Bot de Arbitragem iniciado.")
     
     moedas = await buscar_moedas_liquidas()
     if not moedas:
@@ -104,15 +105,15 @@ async def arbitrage_loop():
                     arbitragem = encontrar_arbitragem(precos)
                     if arbitragem:
                         msg = (
-                            f"💸 **ARBITRAGEM DETECTADA**\n\n"
-                            f"🪙 Par: {moeda}/USD\n"
+                            f"💸 <b>ARBITRAGEM DETECTADA</b>\n\n"
+                            f"🪙 Par: {moeda.upper()}/USD\n"
                             f"📉 Comprar em: {arbitragem['compra'][0]} por ${arbitragem['compra'][1]:.2f}\n"
                             f"📈 Vender em: {arbitragem['venda'][0]} por ${arbitragem['venda'][1]:.2f}\n"
-                            f"💰 Lucro: **{arbitragem['lucro']}%**"
+                            f"💰 Lucro: <b>{arbitragem['lucro']}%</b>"
                         )
                         await enviar_mensagem(msg)
 
-            await asyncio.sleep(60) # Espera 60 segundos entre as checagens
+            await asyncio.sleep(60)
         
         except asyncio.CancelledError:
             print("Loop de arbitragem cancelado.")
@@ -121,7 +122,7 @@ async def arbitrage_loop():
             await enviar_mensagem(f"❗️ Erro no bot durante o loop: {str(e)}")
             await asyncio.sleep(60)
             
-    await enviar_mensagem("🔴 **Bot de Arbitragem parado.**")
+    await enviar_mensagem("🔴 Bot de Arbitragem parado.")
 
 # --- COMANDOS DO TELEGRAM ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -156,20 +157,20 @@ async def setlucro_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         LUCRO_MINIMO = novo_lucro
-        await update.message.reply_text(f"Lucro mínimo de arbitragem alterado para {LUCRO_MINIMO}%")
+        await update.message.reply_text(f"Lucro mínimo alterado para {LUCRO_MINIMO}%")
 
     except ValueError:
-        await update.message.reply_text("Por favor, insira um valor numérico válido.")
+        await update.message.reply_text("Por favor, insira um número válido.")
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global is_running, LUCRO_MINIMO
     status = "rodando" if is_running else "parado"
-    await update.message.reply_text(f"Status do bot: **{status}**\nLucro mínimo atual: **{LUCRO_MINIMO}%**", parse_mode=telegram.constants.ParseMode.MARKDOWN)
+    await update.message.reply_text(f"Status do bot: <b>{status}</b>\nLucro mínimo atual: <b>{LUCRO_MINIMO}%</b>", parse_mode=telegram.constants.ParseMode.HTML)
 
 # --- EXECUÇÃO DO BOT ---
 if __name__ == "__main__":
-    if not TELEGRAM_TOKEN:
-        print("Erro: TOKEN do Telegram não configurado. O bot não pode ser iniciado.")
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Erro: Variáveis TOKEN ou CHAT_ID não configuradas.")
     else:
         application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
         application.add_handler(CommandHandler("start", start_command))
