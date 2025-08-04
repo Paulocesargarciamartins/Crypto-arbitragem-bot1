@@ -1,11 +1,13 @@
+import os  # Importa a biblioteca os para acessar as variáveis de ambiente
 import time
 import asyncio
 import aiohttp
 import telegram
 
 # --- CONFIGURAÇÕES DO BOT TELEGRAM ---
-TELEGRAM_TOKEN = 'SEU_TOKEN_AQUI'
-TELEGRAM_CHAT_ID = 'SEU_CHAT_ID_AQUI'
+# Lê as variáveis de ambiente do Heroku
+TELEGRAM_TOKEN = os.getenv('TOKEN')
+TELEGRAM_CHAT_ID = os.getenv('CHAT_ID')
 
 # --- CONFIGURAÇÕES GERAIS ---
 INTERVALO_CHECAGEM = 60  # segundos
@@ -24,6 +26,11 @@ MOEDAS = ['BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOGE', 'AVAX', 'LINK', 'DOT
 
 # --- FUNÇÃO: Enviar mensagem para o Telegram ---
 async def enviar_mensagem(mensagem):
+    # Verifica se as variáveis foram lidas corretamente antes de continuar
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Erro: As variáveis de ambiente TOKEN ou CHAT_ID não foram encontradas.")
+        return
+
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=mensagem, parse_mode=telegram.constants.ParseMode.HTML)
 
@@ -39,7 +46,9 @@ async def buscar_preco_par(session, par):
                     data = await resp.json()
                     if par in data and 'usd' in data[par]:
                         resultados[ex] = data[par]['usd']
-        except:
+        except Exception as e:
+            # Captura exceções para evitar que o loop pare
+            print(f"Erro ao buscar preço em {ex}: {e}")
             continue
 
     return resultados
@@ -49,8 +58,11 @@ def encontrar_arbitragem(precos):
     if not precos:
         return None
 
-    menor = min(precos.items(), key=lambda x: x[1])
-    maior = max(precos.items(), key=lambda x: x[1])
+    try:
+        menor = min(precos.items(), key=lambda x: x[1])
+        maior = max(precos.items(), key=lambda x: x[1])
+    except ValueError:
+        return None
 
     preco_compra = menor[1]
     preco_venda = maior[1]
@@ -71,6 +83,10 @@ def encontrar_arbitragem(precos):
 
 # --- LOOP PRINCIPAL ---
 async def main():
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Erro crítico: As variáveis de ambiente TOKEN ou CHAT_ID não foram configuradas. O bot será encerrado.")
+        return
+
     await enviar_mensagem("🟢 <b>Bot de Arbitragem Cripto iniciado.</b>")
 
     while True:
@@ -100,3 +116,4 @@ async def main():
 # --- EXECUÇÃO ---
 if __name__ == "__main__":
     asyncio.run(main())
+
