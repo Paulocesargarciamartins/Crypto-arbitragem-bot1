@@ -1,172 +1,111 @@
-import os
 import asyncio
 import aiohttp
-import logging
+import telegram
+from telegram.ext import ApplicationBuilder, CommandHandler
+import time
 
-from dotenv import load_dotenv
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, JobQueue
+# Configurações
+TOKEN = 'SEU_TOKEN_AQUI'
+CHAT_ID = 1093248456  # Substitua pelo seu
+lucro_minimo = 0.5  # lucro mínimo em %
+monitorando = True
 
-# Configuração de Logs com DEBUG ativado
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.DEBUG  # DEBUG para logs detalhados
-)
-logger = logging.getLogger(__name__)
+exchanges = ['binance', 'kraken', 'coinbase', 'bitstamp']
+pares = ['BTC/USDT', 'ETH/USDT']
 
-# Carrega variáveis do arquivo .env
-load_dotenv()
-TOKEN = os.getenv("TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
-PROFIT_PERCENT_THRESHOLD = float(os.getenv("PROFIT_PERCENT_THRESHOLD", 0.5))
-CHECK_INTERVAL_SECONDS = int(os.getenv("CHECK_INTERVAL_SECONDS", 60))
+bot = telegram.Bot(token=TOKEN)
 
-# Exchanges confiáveis já presentes no seu código base
-EXCHANGES = [
-    'binance', 'bitfinex', 'kraken', 'kucoin', 'coinbase',
-    'gateio', 'bitstamp', 'mexc', 'bitmart', 'okx',
-    'bybit', 'bingx', 'huobi', 'whitebit', 'coinex',
-    'poloniex', 'bittrex', 'hitbtc', 'gemini', 'bitflyer'
-]
+async def enviar_alerta(msg):
+    await bot.send_message(chat_id=CHAT_ID, text=msg)
 
-# Lista das 150 primeiras moedas da Binance em pares USDC
-PAIRS = [
-    'BTC/USDC', 'ETH/USDC', 'XRP/USDC', 'USDT/USDC', 'BNB/USDC', 'SOL/USDC', 'USDC/USDC',
-    'TRX/USDC', 'DOGE/USDC', 'ADA/USDC', 'SUI/USDC', 'XLM/USDC', 'BCH/USDC', 'LINK/USDC',
-    'HBAR/USDC', 'AVAX/USDC', 'LTC/USDC', 'SHIB/USDC', 'XMR/USDC', 'UNI/USDC', 'DOT/USDC',
-    'PEPE/USDC', 'AAVE/USDC', 'CRO/USDC', 'ETC/USDC', 'NEAR/USDC', 'OKB/USDC', 'APT/USDC',
-    'ICP/USDC', 'ALGO/USDC', 'ATOM/USDC', 'TRUMP/USDC', 'ENA/USDC', 'WIF/USDC', 'FTM/USDC',
-    'FIL/USDC', 'GRT/USDC', 'IOTA/USDC', 'MKR/USDC', 'IMX/USDC', 'INJ/USDC', 'AR/USDC',
-    'THETA/USDC', 'NEO/USDC', 'ASTR/USDC', 'AXS/USDC', 'ZEC/USDC', 'STX/USDC', 'KCS/USDC',
-    'GALA/USDC', 'CRV/USDC', 'SAND/USDC', 'CHZ/USDC', 'CFX/USDC', 'DYDX/USDC', 'KLAY/USDC',
-    'ENJ/USDC', 'RNDR/USDC', 'GNO/USDC', 'WEMIX/USDC', 'CAKE/USDC', 'GMX/USDC', 'MINA/USDC',
-    'FLOW/USDC', 'FXS/USDC', 'USDE/USDC', 'EOS/USDC', 'DASH/USDC', 'CELO/USDC', 'EGLD/USDC',
-    'APE/USDC', 'SUSHI/USDC', 'RPL/USDC', 'ROSE/USDC', 'XEC/USDC', 'SNX/USDC', '1INCH/USDC',
-    'ACA/USDC', 'KAVA/USDC', 'VET/USDC', 'LRC/USDC', 'GT/USDC', 'TON/USDC', 'BTT/USDC',
-    'BAT/USDC', 'ZIL/USDC', 'MANA/USDC', 'NEXO/USDC', 'HNT/USDC', 'QTUM/USDC', 'TFUEL/USDC',
-    'BICO/USDC', 'DODO/USDC', 'AXL/USDC', 'SKL/USDC', 'WAVES/USDC', 'TWT/USDC', 'COMP/USDC',
-    'TWT/USDC', 'MATIC/USDC', 'XNO/USDC', 'PEPE/USDC', 'BONK/USDC', 'WLD/USDC', 'TURBO/USDC',
-    'SEI/USDC', 'PYTH/USDC', 'TIA/USDC', 'AEVO/USDC', 'PENDLE/USDC', 'DOGAI/USDC', 'JASMY/USDC',
-    'HOOK/USDC', 'BLUR/USDC', 'ID/USDC', 'ARB/USDC', 'CRO/USDC', 'BICO/USDC', 'MASK/USDC',
-    'ZRX/USDC', 'RLC/USDC', 'CELR/USDC', 'NKN/USDC', 'NMR/USDC', 'ILV/USDC', 'AGIX/USDC',
-    'HIGH/USDC', 'OCEAN/USDC'
-]
+async def buscar_preco(session, exchange, par):
+    # Simulação de preço
+    await asyncio.sleep(0.2)
+    preco_simulado = 10000 + hash(f"{exchange}-{par}") % 1000
+    return preco_simulado
 
-async def get_price(session, exchange, pair):
-    try:
-        base, quote = pair.split('/')
-        url = f'https://api.cryptorank.io/v0/markets/prices?pair={base}{quote}&exchange={exchange}'
-        async with session.get(url, timeout=10) as response:
-            response.raise_for_status()
-            data = await response.json()
-            price = data.get('price', None)
-            logger.debug(f"Preço {pair} na {exchange}: {price}")
-            return price
-    except aiohttp.ClientResponseError as e:
-        if e.status == 404:
-            logger.warning(f"Preço não encontrado para {pair} na {exchange} (404)")
-        else:
-            logger.warning(f"Erro HTTP para {pair} na {exchange}: {e}")
-        return None
-    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-        logger.warning(f"Erro ao obter preço de {pair} na exchange {exchange}: {e}")
-        return None
-    except Exception as e:
-        logger.error(f"Erro inesperado ao processar {pair} na {exchange}: {e}")
-        return None
+async def verificar_arbitragem():
+    global monitorando
+    while monitorando:
+        async with aiohttp.ClientSession() as session:
+            for par in pares:
+                precos = {}
+                for exchange in exchanges:
+                    preco = await buscar_preco(session, exchange, par)
+                    precos[exchange] = preco
 
-async def check_arbitrage_job(context: ContextTypes.DEFAULT_TYPE):
-    logger.info("Iniciando verificação de arbitragem...")
-    async with aiohttp.ClientSession() as session:
-        for pair in PAIRS:
-            tasks = [get_price(session, exchange, pair) for exchange in EXCHANGES]
-            prices_raw = await asyncio.gather(*tasks)
+                menor = min(precos.values())
+                maior = max(precos.values())
 
-            prices = [(EXCHANGES[i], price) for i, price in enumerate(prices_raw) if price is not None]
-
-            if len(prices) >= 2:
-                min_ex, min_price = min(prices, key=lambda x: x[1])
-                max_ex, max_price = max(prices, key=lambda x: x[1])
-
-                if min_price == 0:
-                    continue
-
-                profit_percent = ((max_price - min_price) / min_price) * 100
-
-                if profit_percent >= PROFIT_PERCENT_THRESHOLD:
+                lucro = ((maior - menor) / menor) * 100
+                if lucro >= lucro_minimo:
                     msg = (
-                        f"📈 Oportunidade de Arbitragem:\n\n"
-                        f"Par: {pair}\n"
-                        f"Comprar em: {min_ex.upper()} a {min_price:.6f}\n"
-                        f"Vender em: {max_ex.upper()} a {max_price:.6f}\n"
-                        f"Lucro estimado: {profit_percent:.2f}%"
+                        f"🔔 Oportunidade de arbitragem!\nPar: {par}\n"
+                        f"💰 Comprar em: {min(precos, key=precos.get)} a {menor:.2f}\n"
+                        f"💸 Vender em: {max(precos, key=precos.get)} a {maior:.2f}\n"
+                        f"📊 Lucro: {lucro:.2f}%"
                     )
-                    logger.info(f"Enviando mensagem: {msg}")
-                    await context.bot.send_message(chat_id=CHAT_ID, text=msg)
-            else:
-                logger.debug(f"Pares insuficientes para arbitragem em {pair}: {len(prices)} preços encontrados")
+                    await enviar_alerta(msg)
+        await asyncio.sleep(10)
 
-    logger.info("Verificação de arbitragem finalizada.")
+# Comandos do Telegram
 
-# --- Comandos Telegram ---
+async def start(update, context):
+    global monitorando
+    monitorando = True
+    await update.message.reply_text("✅ Monitoramento iniciado.")
+    asyncio.create_task(verificar_arbitragem())
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        'Olá! Eu sou o Crypto Arbitragem Bot. Para iniciar as verificações, use /run. Para alterar o lucro mínimo use /setprofit <valor_em_percent>'
-    )
+async def stop(update, context):
+    global monitorando
+    monitorando = False
+    await update.message.reply_text("🛑 Monitoramento parado.")
 
-async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not any(j.name == 'arbitrage_job' for j in context.job_queue.jobs()):
-        context.job_queue.run_repeating(
-            check_arbitrage_job,
-            interval=CHECK_INTERVAL_SECONDS,
-            first=1,
-            name='arbitrage_job'
-        )
-        await update.message.reply_text(f'Verificação de arbitragem iniciada. Intervalo: {CHECK_INTERVAL_SECONDS} segundos.')
-    else:
-        await update.message.reply_text('A verificação de arbitragem já está em execução.')
-
-async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    jobs = context.job_queue.get_jobs_by_name('arbitrage_job')
-    if jobs:
-        jobs[0].schedule_removal()
-        await update.message.reply_text('Verificação de arbitragem parada.')
-    else:
-        await update.message.reply_text('A verificação não está em execução.')
-
-async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    jobs = context.job_queue.get_jobs_by_name('arbitrage_job')
-    if jobs:
-        await update.message.reply_text('O bot está ATIVO e verificando arbitragem.')
-    else:
-        await update.message.reply_text('O bot está INATIVO. Use /run para iniciar.')
-
-async def setprofit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def set_percent(update, context):
+    global lucro_minimo
     try:
-        novo_valor = float(context.args[0])
-        global PROFIT_PERCENT_THRESHOLD
-        PROFIT_PERCENT_THRESHOLD = novo_valor
-        await update.message.reply_text(f'Lucro mínimo alterado para {novo_valor:.2f}%')
-    except (IndexError, ValueError):
-        await update.message.reply_text('Uso correto: /setprofit <valor_em_percent>')
+        lucro_minimo = float(context.args[0])
+        await update.message.reply_text(f"📈 Margem de lucro mínima ajustada para {lucro_minimo}%")
+    except:
+        await update.message.reply_text("⚠️ Use o comando assim: /setpercent 1.2")
 
-def main():
-    if not TOKEN or not CHAT_ID:
-        logger.error("TOKEN ou CHAT_ID não definidos no arquivo .env")
-        return
+async def add_pair(update, context):
+    global pares
+    try:
+        novo = context.args[0].upper()
+        if novo not in pares:
+            pares.append(novo)
+            await update.message.reply_text(f"✅ Par adicionado: {novo}")
+        else:
+            await update.message.reply_text("⚠️ Esse par já está sendo monitorado.")
+    except:
+        await update.message.reply_text("⚠️ Use assim: /addpair BTC/USDT")
 
-    application = Application.builder().token(TOKEN).build()
+async def add_exchange(update, context):
+    global exchanges
+    try:
+        nova = context.args[0].lower()
+        if nova not in exchanges:
+            exchanges.append(nova)
+            await update.message.reply_text(f"✅ Exchange adicionada: {nova}")
+        else:
+            await update.message.reply_text("⚠️ Essa exchange já está sendo monitorada.")
+    except:
+        await update.message.reply_text("⚠️ Use assim: /addexchange binance")
 
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("run", run_command))
-    application.add_handler(CommandHandler("stop", stop_command))
-    application.add_handler(CommandHandler("status", status_command))
-    application.add_handler(CommandHandler("setprofit", setprofit_command))
+# Inicialização do bot
+async def main():
+    app = ApplicationBuilder().token(TOKEN).build()
 
-    application.job_queue.run_repeating(check_arbitrage_job, interval=CHECK_INTERVAL_SECONDS, first=1, name='arbitrage_job')
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("stop", stop))
+    app.add_handler(CommandHandler("setpercent", set_percent))
+    app.add_handler(CommandHandler("addpair", add_pair))
+    app.add_handler(CommandHandler("addexchange", add_exchange))
 
-    application.run_polling()
+    print("🤖 Bot rodando...")
+    await app.start()
+    await app.updater.start_polling()
+    await app.updater.idle()
 
-if __name__ == "__main__":
-    main()
+asyncio.run(main())
