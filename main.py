@@ -21,6 +21,8 @@ CHAT_ID = os.getenv("CHAT_ID")
 PROFIT_PERCENT_THRESHOLD = float(os.getenv("PROFIT_PERCENT_THRESHOLD", 1.0))
 CHECK_INTERVAL_SECONDS = int(os.getenv("CHECK_INTERVAL_SECONDS", 60))
 
+current_profit_threshold = PROFIT_PERCENT_THRESHOLD  # Pode ser alterado via Telegram
+
 EXCHANGES = [
     'binance', 'bitfinex', 'kraken', 'kucoin', 'coinbase',
     'gateio', 'bitstamp', 'mexc', 'bitmart', 'okx',
@@ -69,8 +71,11 @@ async def check_arbitrage_job(context: ContextTypes.DEFAULT_TYPE):
     logger.info("Iniciando verificação de arbitragem...")
     async with aiohttp.ClientSession() as session:
         for pair in PAIRS:
-            tasks = [get_price(session, exchange, pair) for exchange in EXCHANGES]
-            prices_raw = await asyncio.gather(*tasks)
+            prices_raw = []
+            for exchange in EXCHANGES:
+                price = await get_price(session, exchange, pair)
+                prices_raw.append(price)
+                await asyncio.sleep(1)  # Evita erro 429 (Too Many Requests)
 
             prices = []
             for i, price in enumerate(prices_raw):
@@ -86,7 +91,7 @@ async def check_arbitrage_job(context: ContextTypes.DEFAULT_TYPE):
                 
                 profit_percent = ((max_price - min_price) / min_price) * 100
                 
-                if profit_percent >= PROFIT_PERCENT_THRESHOLD:
+                if profit_percent >= current_profit_threshold:
                     msg = (
                         f"📈 Oportunidade de Arbitragem:\n\n"
                         f"Par: {pair}\n"
@@ -136,6 +141,15 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text('O bot está INATIVO. Use /run para iniciar.')
 
+async def set_profit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global current_profit_threshold
+    try:
+        value = float(context.args[0])
+        current_profit_threshold = value
+        await update.message.reply_text(f'🔧 Lucro mínimo de arbitragem alterado para {value:.2f}%.')
+    except (IndexError, ValueError):
+        await update.message.reply_text('❌ Uso correto: /setprofit 1.5')
+
 def main():
     if not TOKEN or not CHAT_ID:
         logger.error("TOKEN ou CHAT_ID não estão definidos. Verifique seu arquivo .env")
@@ -148,6 +162,7 @@ def main():
     application.add_handler(CommandHandler("run", run_command))
     application.add_handler(CommandHandler("stop", stop_command))
     application.add_handler(CommandHandler("status", status_command))
+    application.add_handler(CommandHandler("setprofit", set_profit_command))
     
     application.run_polling()
 
