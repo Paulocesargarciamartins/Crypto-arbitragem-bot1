@@ -1,78 +1,91 @@
 import asyncio
 import aiohttp
+import time
 import telegram
 
-TOKEN = '7218062934:AAEcgNpqN3itPQ-GzotVtR_eQc7g9FynbzQ'
-CHAT_ID = '1093248456'
-LUCRO_MINIMO = 0.5  # em porcentagem
-PAIRES_MONITORADOS = 100
+TOKEN = "SEU_TOKEN_AQUI"
+CHAT_ID = "SEU_CHAT_ID_AQUI"
+MIN_LUCRO = 0.5  # 0.5% de lucro mínimo para alertar
 
-# Lista de moedas para monitorar (pode expandir até 100)
-MOEDAS = [
-    'BTC', 'ETH', 'XRP', 'ADA', 'DOGE', 'SOL', 'DOT', 'AVAX', 'TRX', 'MATIC',
-    'LTC', 'LINK', 'BCH', 'UNI', 'ATOM', 'XLM', 'NEAR', 'APE', 'ETC', 'FIL',
-    'EOS', 'XTZ', 'AAVE', 'SUSHI', 'COMP', 'VET', 'HBAR', 'FTM', 'RUNE', 'ZEC', 'MKR',
-    'ALGO', 'SNX', 'CRV', 'ENJ', 'KSM', 'KNC', 'LRC', 'ZRX', 'CHZ', 'ANKR',
-    'BAT', 'OMG', 'DASH', 'QTUM', 'ICX', 'ONT', 'WAVES', 'NANO', 'BNT', 'SC',
-    '1INCH', 'YFI', 'GRT', 'CKB', 'BAND', 'REEF', 'RSR', 'STORJ', 'DGB', 'REN',
-    'SRM', 'CELR', 'CVC', 'ARDR', 'SYS', 'XEM', 'FUN', 'POWR', 'NMR', 'LPT',
-    'RLC', 'STMX', 'XVG', 'SNT', 'OXT', 'ELF', 'NKN', 'POLY', 'STPT', 'TOMO',
-    'TRB', 'REQ', 'BTS', 'STEEM', 'STRAX', 'PERL', 'BLZ', 'MFT', 'DNT', 'PHA',
-    'FORTH', 'ORN', 'DATA', 'UTK', 'DOCK', 'MDT', 'CTSI', 'MIR', 'FET', 'LINA'
+moedas = [
+    "BTC", "ETH", "LTC", "XRP", "DOGE", "ADA", "TRX", "SOL", "MATIC",
+    "BCH", "DOT", "AVAX", "ATOM", "NEAR", "UNI", "XLM", "ALGO", "APE",
+    "SAND", "AXS", "GMT", "FTM", "GALA", "CHZ", "RNDR", "HBAR", "AR",
+    "WAVES", "BAND", "STMX", "STORJ", "SC", "REEF", "KNC", "CTSI", "SYS"
 ]
 
-EXCHANGES = {
-    "binance": "https://api.binance.com/api/v3/ticker/price?symbol={}USDT",
-    "gateio": "https://api.gate.io/api2/1/ticker/{}_usdt",
-    "kucoin": "https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={}USDT"
+exchanges = {
+    "BINANCE": "https://api.binance.com/api/v3/ticker/price?symbol={moeda}USDT",
+    "KUCOIN": "https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={moeda}-USDT"
 }
 
 bot = telegram.Bot(token=TOKEN)
 
-async def pegar_preco(session, exchange, moeda):
-    url = EXCHANGES[exchange].format(moeda.lower() if exchange == "gateio" else moeda.upper())
+async def get_price(session, url, exchange, moeda):
     try:
-        async with session.get(url, timeout=10) as resp:
-            data = await resp.json()
-            if exchange == "binance":
+        async with session.get(url, timeout=10) as response:
+            data = await response.json()
+
+            if exchange == "BINANCE":
                 return float(data["price"])
-            elif exchange == "gateio":
-                return float(data["last"])
-            elif exchange == "kucoin":
-                return float(data["price"])
+
+            elif exchange == "KUCOIN":
+                if "data" in data and "price" in data["data"]:
+                    return float(data["data"]["price"])
+                else:
+                    print(f"[ERRO] {exchange} - {moeda}: 'price' ausente")
+                    return None
     except Exception as e:
-        print(f"[ERRO] {exchange.upper()} - {moeda}: {e}")
+        print(f"[ERRO] {exchange} - {moeda}: {e}")
         return None
 
-async def verificar_oportunidade(session, moeda):
-    precos = {}
-    for exchange in EXCHANGES:
-        preco = await pegar_preco(session, exchange, moeda)
-        if preco:
-            precos[exchange] = preco
+async def verificar_arbitragem():
+    async with aiohttp.ClientSession() as session:
+        for moeda in moedas:
+            tasks = []
+            for exchange, url in exchanges.items():
+                full_url = url.format(moeda=moeda)
+                tasks.append(get_price(session, full_url, exchange, moeda))
 
-    if len(precos) >= 2:
-        maior = max(precos, key=precos.get)
-        menor = min(precos, key=precos.get)
-        preco_maior = precos[maior]
-        preco_menor = precos[menor]
-        lucro_percentual = ((preco_maior - preco_menor) / preco_menor) * 100
+            try:
+                resultados = await asyncio.gather(*tasks)
+                if None in resultados or len(resultados) != 2:
+                    continue
 
-        if lucro_percentual >= LUCRO_MINIMO:
-            mensagem = f"📈 *Arbitragem encontrada!* 💰\n\n" \
-                       f"Moeda: *{moeda}*\n" \
-                       f"Comprar: *{menor.upper()}* a *{preco_menor:.2f} USDT*\n" \
-                       f"Vender: *{maior.upper()}* a *{preco_maior:.2f} USDT*\n" \
-                       f"Lucro: *{lucro_percentual:.2f}%*"
-            await bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode=telegram.constants.ParseMode.MARKDOWN)
+                preco_binance, preco_kucoin = resultados
 
-async def loop_arbitragem():
+                maior = max(preco_binance, preco_kucoin)
+                menor = min(preco_binance, preco_kucoin)
+
+                if menor == 0:
+                    continue
+
+                lucro_percent = ((maior - menor) / menor) * 100
+
+                if lucro_percent >= MIN_LUCRO:
+                    exchange_compra = "BINANCE" if preco_binance == menor else "KUCOIN"
+                    exchange_venda = "BINANCE" if preco_binance == maior else "KUCOIN"
+                    mensagem = (
+                        f"💰 *Oportunidade de Arbitragem*\n"
+                        f"Moeda: *{moeda}*\n"
+                        f"Comprar em: *{exchange_compra}* a *${menor:.4f}*\n"
+                        f"Vender em: *{exchange_venda}* a *${maior:.4f}*\n"
+                        f"Lucro estimado: *{lucro_percent:.2f}%*"
+                    )
+                    await bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode="Markdown")
+                    print(f"[ALERTA ENVIADO] {mensagem}")
+
+            except Exception as e:
+                print(f"[ERRO geral] {moeda}: {e}")
+
+async def arbitrage_loop():
+    print("Bot pronto para receber comandos...")
     while True:
-        async with aiohttp.ClientSession() as session:
-            tasks = [verificar_oportunidade(session, moeda) for moeda in MOEDAS[:PAIRES_MONITORADOS]]
-            await asyncio.gather(*tasks)
-        await asyncio.sleep(60)  # verifica a cada 1 minuto
+        await verificar_arbitragem()
+        await asyncio.sleep(30)  # verifica a cada 30 segundos
 
 if __name__ == "__main__":
-    print("Bot iniciado e rodando no Heroku...")
-    asyncio.run(loop_arbitragem())
+    try:
+        asyncio.run(arbitrage_loop())
+    except Exception as e:
+        print(f"[ERRO FATAL] {e}")
