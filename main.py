@@ -1,111 +1,68 @@
-import asyncio
-import aiohttp
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import os
+import requests
+import time
+import telegram
 
-TOKEN = '7218062934:AAECGNPQN3ITPQ-GZOTVTR_EQC7G9FYNBZQ'
-CHAT_ID = '1093248456'
+# Obtem o TOKEN do Heroku (variável de ambiente)
+TOKEN = os.environ.get("TOKEN")
+CHAT_ID = "1093248456"  # Seu chat_id
 
-class ArbitragemMonitor:
-    def __init__(self, application):
-        self.application = application
-        self.monitorando = True
-        self.percentual_lucro = 1.5
-        self.moedas_monitoradas = ['BTC', 'ETH', 'LTC']
-        self.exchanges_monitoradas = ['binance', 'coinbase', 'kraken', 'bitstamp']
-        self.arbitragem_task = None
+# Cria o bot do Telegram
+bot = telegram.Bot(token=TOKEN)
 
-    async def verificar_arbitragem(self):
-        async with aiohttp.ClientSession() as session:
-            while self.monitorando:
-                try:
-                    oportunidades = []
-                    # Simulação ou lógica real de arbitragem
-                    # oportunidades.append("Exemplo de oportunidade!")
+# Lista de pares de moedas a monitorar
+pairs = [
+    "BTC/USDT", "ETH/USDT", "XRP/USDT", "LTC/USDT", "BCH/USDT",
+    "BNB/USDT", "DOGE/USDT", "ADA/USDT", "SOL/USDT", "DOT/USDT",
+    "AVAX/USDT", "TRX/USDT", "SHIB/USDT", "MATIC/USDT", "ATOM/USDT"
+]
 
-                    if oportunidades:
-                        mensagem = "\n".join(oportunidades)
-                        await self.application.bot.send_message(chat_id=CHAT_ID, text=mensagem)
+# Exchanges a serem comparadas
+exchanges = {
+    "binance": "https://api.binance.com/api/v3/ticker/price?symbol=",
+    "coinbase": "https://api.coinbase.com/v2/prices/{}-USDT/spot",
+    "kucoin": "https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={}",
+}
 
-                except asyncio.CancelledError:
-                    print("Tarefa cancelada.")
-                    break
-                except Exception as e:
-                    print(f"Erro no monitoramento: {e}")
-                
-                await asyncio.sleep(30)
-
-    async def start_monitoramento(self):
-        self.monitorando = True
-        if self.arbitragem_task and not self.arbitragem_task.done():
-            return
-        self.arbitragem_task = asyncio.create_task(self.verificar_arbitragem())
-
-    async def stop_monitoramento(self):
-        self.monitorando = False
-        if self.arbitragem_task:
-            self.arbitragem_task.cancel()
-            try:
-                await self.arbitragem_task
-            except asyncio.CancelledError:
-                pass
-
-# Comandos do bot
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    monitor = context.bot_data['monitor']
-    await monitor.start_monitoramento()
-    await update.message.reply_text("✅ Monitoramento iniciado!")
-
-async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    monitor = context.bot_data['monitor']
-    await monitor.stop_monitoramento()
-    await update.message.reply_text("🛑 Monitoramento parado!")
-
-async def porcentagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    monitor = context.bot_data['monitor']
+def get_price(exchange, pair):
+    base, quote = pair.split('/')
+    symbol = base + quote
     try:
-        nova = float(context.args[0])
-        monitor.percentual_lucro = nova
-        await update.message.reply_text(f"✅ Novo percentual de lucro: {nova}%")
-    except (ValueError, IndexError):
-        await update.message.reply_text("❌ Use: /porcentagem 2.5")
+        if exchange == "binance":
+            r = requests.get(exchanges[exchange] + symbol)
+            return float(r.json()['price'])
+        elif exchange == "coinbase":
+            r = requests.get(exchanges[exchange].format(base))
+            return float(r.json()['data']['amount'])
+        elif exchange == "kucoin":
+            r = requests.get(exchanges[exchange].format(symbol))
+            return float(r.json()['data']['price'])
+    except:
+        return None
 
-async def moeda(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    monitor = context.bot_data['monitor']
-    if context.args:
-        monitor.moedas_monitoradas = [moeda.upper() for moeda in context.args]
-        await update.message.reply_text(f"✅ Moedas atualizadas: {', '.join(monitor.moedas_monitoradas)}")
-    else:
-        await update.message.reply_text("❌ Use: /moeda BTC ETH LTC")
+def check_arbitrage():
+    for pair in pairs:
+        prices = {}
+        for exchange in exchanges:
+            price = get_price(exchange, pair)
+            if price:
+                prices[exchange] = price
+        if len(prices) >= 2:
+            min_ex = min(prices, key=prices.get)
+            max_ex = max(prices, key=prices.get)
+            min_price = prices[min_ex]
+            max_price = prices[max_ex]
+            profit = ((max_price - min_price) / min_price) * 100
+            if profit >= 1:  # lucro mínimo de 1%
+                message = (
+                    f"💰 Oportunidade de arbitragem!\n\n"
+                    f"🪙 Par: {pair}\n"
+                    f"🔻 Comprar: {min_ex} a {min_price:.2f}\n"
+                    f"🔺 Vender: {max_ex} a {max_price:.2f}\n"
+                    f"📈 Lucro estimado: {profit:.2f}%"
+                )
+                bot.send_message(chat_id=CHAT_ID, text=message)
 
-async def exchange(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    monitor = context.bot_data['monitor']
-    if context.args:
-        monitor.exchanges_monitoradas = [ex.lower() for ex in context.args]
-        await update.message.reply_text(f"✅ Exchanges atualizadas: {', '.join(monitor.exchanges_monitoradas)}")
-    else:
-        await update.message.reply_text("❌ Use: /exchange binance coinbase kraken")
-
-# Inicialização do app com função assíncrona correta
-async def post_init(application):
-    monitor = application.bot_data['monitor']
-    await monitor.start_monitoramento()
-
-def main():
-    app = ApplicationBuilder().token(TOKEN).build()
-    monitor = ArbitragemMonitor(app)
-    app.bot_data['monitor'] = monitor
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("stop", stop))
-    app.add_handler(CommandHandler("porcentagem", porcentagem))
-    app.add_handler(CommandHandler("moeda", moeda))
-    app.add_handler(CommandHandler("exchange", exchange))
-
-    # ✅ Função post_init corrigida
-    app.post_init = post_init
-
-    app.run_polling()
-
-if __name__ == '__main__':
-    main()
+while True:
+    check_arbitrage()
+    time.sleep(60)  # Checa a cada 60 segundos
