@@ -1,170 +1,105 @@
-import os
 import asyncio
 import aiohttp
+import telegram
 import logging
+from datetime import datetime
 
-from dotenv import load_dotenv
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, JobQueue
+# Configurações do bot Telegram
+TELEGRAM_TOKEN = "SEU_TOKEN_AQUI"
+TELEGRAM_CHAT_ID = "SEU_CHAT_ID_AQUI"
 
-# Configuração de Logs
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+# Parâmetros do bot
+MOEDA_REFERENCIA = "USDC"
+VALOR_INVESTIMENTO = 15
+LIMITE_LUCRO_PERCENTUAL = 1.0  # % de diferença para alertar
 
-# Carrega variáveis de ambiente
-load_dotenv()
-TOKEN = os.getenv("TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
-PROFIT_PERCENT_THRESHOLD = float(os.getenv("PROFIT_PERCENT_THRESHOLD", 1.0))
-CHECK_INTERVAL_SECONDS = int(os.getenv("CHECK_INTERVAL_SECONDS", 60))
-
-current_profit_threshold = PROFIT_PERCENT_THRESHOLD  # Pode ser alterado via Telegram
-
+# Exchanges a serem consultadas
 EXCHANGES = [
-    'binance', 'bitfinex', 'kraken', 'kucoin', 'coinbase',
-    'gateio', 'bitstamp', 'mexc', 'bitmart', 'okx',
-    'bybit', 'bingx', 'huobi', 'whitebit'
+    "binance", "coinbase", "kraken", "kucoin", "bitfinex", "gate", "bitstamp",
+    "mexc", "bitmart", "bitget", "okx", "bybit", "poloniex", "lbank",
+    "crypto_com", "hitbtc", "probit", "bittrex", "digifinex", "p2b"
 ]
 
-PAIRS = [
-    'BTC/USDT', 'ETH/USDT', 'ADA/USDT', 'BNB/USDT', 'XRP/USDT',
-    'SOL/USDT', 'DOT/USDT', 'DOGE/USDT', 'AVAX/USDT', 'TRX/USDT',
-    'MATIC/USDT', 'SHIB/USDT', 'ATOM/USDT', 'LTC/USDT', 'BCH/USDT',
-    'FTM/USDT', 'NEAR/USDT', 'APE/USDT', 'CHZ/USDT', 'ALGO/USDT',
-    'XLM/USDT', 'EGLD/USDT', 'VET/USDT', 'SAND/USDT', 'AAVE/USDT',
-    'GALA/USDT', 'AXS/USDT', 'THETA/USDT', 'RUNE/USDT', 'ZIL/USDT',
-    'CRV/USDT', '1INCH/USDT', 'COMP/USDT', 'KSM/USDT', 'ENJ/USDT',
-    'XTZ/USDT', 'LRC/USDT', 'SNX/USDT', 'DYDX/USDT', 'YFI/USDT',
-    'UNI/USDT', 'REN/USDT', 'ZEC/USDT', 'DASH/USDT', 'WAVES/USDT',
-    'ICX/USDT', 'OMG/USDT', 'STORJ/USDT', 'SUSHI/USDT', 'QTUM/USDT',
-    'ANKR/USDT', 'RSR/USDT', 'XEM/USDT', 'BAND/USDT', 'SKL/USDT',
-    'LUNA/USDT', 'SRM/USDT', 'CVC/USDT', 'STMX/USDT', 'TOMO/USDT',
-    'KAVA/USDT', 'AR/USDT', 'GLMR/USDT', 'ACA/USDT', 'FET/USDT',
-    'INJ/USDT', 'CFX/USDT', 'OP/USDT', 'LDO/USDT', 'RNDR/USDT',
-    'XNO/USDT', 'PEPE/USDT', 'BONK/USDT', 'WLD/USDT', 'TURBO/USDT',
-    'SEI/USDT', 'PYTH/USDT', 'TIA/USDT', 'AEVO/USDT', 'PENDLE/USDT',
-    'DOGAI/USDT', 'JASMY/USDT', 'HOOK/USDT', 'BLUR/USDT', 'ID/USDT',
-    'SUI/USDT', 'ARB/USDT', 'GMX/USDT', 'CRO/USDT', 'BICO/USDT',
-    'MASK/USDT', 'ZRX/USDT', 'RLC/USDT', 'CELR/USDT', 'NKN/USDT',
-    'NMR/USDT', 'ILV/USDT', 'AGIX/USDT', 'HIGH/USDT', 'OCEAN/USDT'
-]
+# Número de moedas mais negociadas (ou principais) para verificar
+TOP_N_COINS = 150
 
-async def get_price(session, exchange, pair):
-    try:
-        base, quote = pair.split('/')
-        url = f'https://api.cryptorank.io/v0/markets/prices?pair={base}{quote}&exchange={exchange}'
-        async with session.get(url, timeout=10) as response:
-            response.raise_for_status()
-            data = await response.json()
-            return data.get('price', None)
-    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-        logger.warning(f"Erro ao obter preço de {pair} na exchange {exchange}: {e}")
-        return None
-    except (ValueError, KeyError, IndexError) as e:
-        logger.error(f"Erro ao processar dados de {pair} na exchange {exchange}: {e}")
-        return None
+# Configuração de log para debug
+logging.basicConfig(level=logging.DEBUG)
 
-async def check_arbitrage_job(context: ContextTypes.DEFAULT_TYPE):
-    logger.info("Iniciando verificação de arbitragem...")
+# Inicializa o bot Telegram
+bot = telegram.Bot(token=TELEGRAM_TOKEN)
+
+async def buscar_top_moedas():
+    url = "https://api.coingecko.com/api/v3/coins/markets"
+    params = {
+        "vs_currency": MOEDA_REFERENCIA.lower(),
+        "order": "volume_desc",
+        "per_page": TOP_N_COINS,
+        "page": 1
+    }
     async with aiohttp.ClientSession() as session:
-        for pair in PAIRS:
-            prices_raw = []
-            for exchange in EXCHANGES:
-                price = await get_price(session, exchange, pair)
-                prices_raw.append(price)
-                await asyncio.sleep(1)  # Evita erro 429 (Too Many Requests)
+        async with session.get(url, params=params) as resp:
+            data = await resp.json()
+            return [coin["id"] for coin in data]
 
-            prices = []
-            for i, price in enumerate(prices_raw):
-                if price is not None:
-                    prices.append((EXCHANGES[i], price))
+async def buscar_preco(session, moeda, exchange):
+    url = f"https://api.coingecko.com/api/v3/simple/price"
+    params = {
+        "ids": moeda,
+        "vs_currencies": MOEDA_REFERENCIA.lower(),
+        "include_market_cap": False,
+        "include_24hr_vol": False,
+        "include_24hr_change": False,
+        "include_last_updated_at": False,
+        "exchange_ids": exchange
+    }
+    async with session.get(url, params=params) as resp:
+        try:
+            data = await resp.json()
+            return data.get(moeda, {}).get(MOEDA_REFERENCIA.lower())
+        except Exception as e:
+            logging.debug(f"Erro ao buscar preço de {moeda} na {exchange}: {e}")
+            return None
 
-            if len(prices) >= 2:
-                min_ex, min_price = min(prices, key=lambda x: x[1])
-                max_ex, max_price = max(prices, key=lambda x: x[1])
-                
-                if min_price == 0:
-                    continue
-                
-                profit_percent = ((max_price - min_price) / min_price) * 100
-                
-                if profit_percent >= current_profit_threshold:
-                    msg = (
-                        f"📈 Oportunidade de Arbitragem:\n\n"
-                        f"Par: {pair}\n"
-                        f"Comprar em: {min_ex.upper()} a {min_price:.2f}\n"
-                        f"Vender em: {max_ex.upper()} a {max_price:.2f}\n"
-                        f"Lucro estimado: {profit_percent:.2f}%"
-                    )
-                    await context.bot.send_message(chat_id=CHAT_ID, text=msg)
+async def verificar_arbitragem():
+    moedas = await buscar_top_moedas()
+    logging.debug(f"Top {TOP_N_COINS} moedas: {moedas[:10]}...")
 
-    logger.info("Verificação de arbitragem finalizada.")
+    async with aiohttp.ClientSession() as session:
+        for moeda in moedas:
+            tasks = [buscar_preco(session, moeda, ex) for ex in EXCHANGES]
+            precos = await asyncio.gather(*tasks)
 
-# --- Comandos do Telegram ---
+            pares = list(zip(EXCHANGES, precos))
+            pares = [(ex, preco) for ex, preco in pares if preco]
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        'Olá! Eu sou o Crypto Arbitragem Bot. Para iniciar as verificações, use o comando /run.'
-    )
+            if len(pares) < 2:
+                continue
 
-async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not any(j.name == 'arbitrage_job' for j in context.job_queue.jobs()):
-        context.job_queue.run_repeating(
-            check_arbitrage_job, 
-            interval=CHECK_INTERVAL_SECONDS, 
-            first=1, 
-            name='arbitrage_job'
-        )
-        await update.message.reply_text(
-            f'Verificação de arbitragem iniciada. Verificando a cada {CHECK_INTERVAL_SECONDS} segundos.'
-        )
-    else:
-        await update.message.reply_text(
-            'A verificação de arbitragem já está em execução.'
-        )
+            menor = min(pares, key=lambda x: x[1])
+            maior = max(pares, key=lambda x: x[1])
 
-async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    job = context.job_queue.get_jobs_by_name('arbitrage_job')
-    if job:
-        job[0].schedule_removal()
-        await update.message.reply_text('Verificação de arbitragem parada.')
-    else:
-        await update.message.reply_text('A verificação não está em execução.')
+            diff_percent = ((maior[1] - menor[1]) / menor[1]) * 100
 
-async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    job = context.job_queue.get_jobs_by_name('arbitrage_job')
-    if job:
-        await update.message.reply_text('O bot está ATIVO e verificando arbitragem.')
-    else:
-        await update.message.reply_text('O bot está INATIVO. Use /run para iniciar.')
+            if diff_percent >= LIMITE_LUCRO_PERCENTUAL:
+                lucro_est = (VALOR_INVESTIMENTO / menor[1]) * maior[1] - VALOR_INVESTIMENTO
+                msg = (
+                    f"🔁 *Arbitragem Encontrada!*\n"
+                    f"🪙 Moeda: *{moeda.upper()}*\n"
+                    f"📉 Comprar: *{menor[0]}* por *{menor[1]:.4f}*\n"
+                    f"📈 Vender: *{maior[0]}* por *{maior[1]:.4f}*\n"
+                    f"💰 Lucro estimado: *{lucro_est:.2f} {MOEDA_REFERENCIA}* ({diff_percent:.2f}%)\n"
+                    f"🕒 {datetime.utcnow().strftime('%H:%M:%S')}"
+                )
+                await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg, parse_mode="Markdown")
 
-async def set_profit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global current_profit_threshold
-    try:
-        value = float(context.args[0])
-        current_profit_threshold = value
-        await update.message.reply_text(f'🔧 Lucro mínimo de arbitragem alterado para {value:.2f}%.')
-    except (IndexError, ValueError):
-        await update.message.reply_text('❌ Uso correto: /setprofit 1.5')
-
-def main():
-    if not TOKEN or not CHAT_ID:
-        logger.error("TOKEN ou CHAT_ID não estão definidos. Verifique seu arquivo .env")
-        return
-
-    application = Application.builder().token(TOKEN).build()
-    job_queue = application.job_queue
-
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("run", run_command))
-    application.add_handler(CommandHandler("stop", stop_command))
-    application.add_handler(CommandHandler("status", status_command))
-    application.add_handler(CommandHandler("setprofit", set_profit_command))
-    
-    application.run_polling()
+async def main():
+    while True:
+        try:
+            await verificar_arbitragem()
+        except Exception as e:
+            logging.debug(f"Erro geral: {e}")
+        await asyncio.sleep(60)  # espera 1 minuto
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
