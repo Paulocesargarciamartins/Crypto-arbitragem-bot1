@@ -1,91 +1,111 @@
 import asyncio
 import aiohttp
-import time
 import telegram
+from telegram.ext import Application, CommandHandler, ContextTypes
+from decimal import Decimal, InvalidOperation
 
-TOKEN = "SEU_TOKEN_AQUI"
-CHAT_ID = "SEU_CHAT_ID_AQUI"
-MIN_LUCRO = 0.5  # 0.5% de lucro mínimo para alertar
+# ==================== CONFIGURAÇÕES ====================
+TOKEN = '7218062934:AAEcgNpqN3itPQ-GzotVtR_eQc7g9FynbzQ'  # <-- Seu token
+CHAT_ID = '1093248456'  # <-- Seu chat_id
+PORCENTAGEM_MINIMA = Decimal("0.5")  # Pode ser alterada por comando
+PAUSADO = False
 
-moedas = [
-    "BTC", "ETH", "LTC", "XRP", "DOGE", "ADA", "TRX", "SOL", "MATIC",
-    "BCH", "DOT", "AVAX", "ATOM", "NEAR", "UNI", "XLM", "ALGO", "APE",
-    "SAND", "AXS", "GMT", "FTM", "GALA", "CHZ", "RNDR", "HBAR", "AR",
-    "WAVES", "BAND", "STMX", "STORJ", "SC", "REEF", "KNC", "CTSI", "SYS"
+EXCHANGES = [
+    'binance', 'kucoin', 'bitget', 'coinbase', 'bybit', 'mexc',
+    'gate', 'huobi', 'bitmart', 'okx', 'bitfinex', 'lbank',
+    'crypto_com', 'bigone'
 ]
 
-exchanges = {
-    "BINANCE": "https://api.binance.com/api/v3/ticker/price?symbol={moeda}USDT",
-    "KUCOIN": "https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={moeda}-USDT"
-}
+PARES = [
+    'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'ADA/USDT',
+    'DOGE/USDT', 'SHIB/USDT', 'AVAX/USDT', 'MATIC/USDT', 'DOT/USDT',
+    'TRX/USDT', 'LTC/USDT', 'BCH/USDT', 'UNI/USDT', 'ETC/USDT',
+    'XLM/USDT', 'ATOM/USDT', 'VET/USDT', 'ICP/USDT', 'FIL/USDT',
+    'AAVE/USDT', 'ALGO/USDT', 'NEAR/USDT', 'EOS/USDT', 'MANA/USDT',
+    'XTZ/USDT', 'EGLD/USDT', 'RUNE/USDT', 'HBAR/USDT', 'SAND/USDT',
+    'AXS/USDT', 'GRT/USDT', 'CRV/USDT', '1INCH/USDT', 'ZIL/USDT',
+    'ZRX/USDT', 'YFI/USDT', 'ENJ/USDT', 'FLOW/USDT', 'GALA/USDT',
+    'IMX/USDT', 'LDO/USDT', 'DYDX/USDT', 'OP/USDT', 'ARB/USDT',
+    'SUSHI/USDT', 'STX/USDT', 'SNX/USDT', 'REN/USDT', 'RSR/USDT',
+    'OMG/USDT', 'OCEAN/USDT', 'NKN/USDT', 'MINA/USDT', 'MASK/USDT',
+    'KNC/USDT', 'KAVA/USDT', 'JOE/USDT', 'INJ/USDT', 'ICX/USDT',
+    'HOT/USDT', 'GLMR/USDT', 'ENS/USDT', 'CTSI/USDT', 'COTI/USDT',
+    'COMP/USDT', 'CELR/USDT', 'CAKE/USDT', 'BNT/USDT', 'BEL/USDT',
+    'BAL/USDT', 'ANKR/USDT', 'ANT/USDT', 'ALICE/USDT', 'AGLD/USDT',
+    'ACH/USDT', '1000SHIB/USDT', '1000FLOKI/USDT', 'LUNA/USDT',
+    'USTC/USDT', 'WOO/USDT', 'TWT/USDT', 'TON/USDT', 'PEPE/USDT',
+    'FET/USDT', 'PYR/USDT', 'FXS/USDT', 'DODO/USDT', 'DENT/USDT',
+    'CTK/USDT', 'BLUR/USDT', 'BTG/USDT', 'ZEC/USDT', 'QTUM/USDT',
+    'SC/USDT', 'WAVES/USDT', 'STORJ/USDT', 'SXP/USDT', 'TOMO/USDT',
+    'VTHO/USDT', 'ZEN/USDT', 'ZRX/USDT', 'WRX/USDT', 'YGG/USDT'
+]
 
-bot = telegram.Bot(token=TOKEN)
-
-async def get_price(session, url, exchange, moeda):
-    try:
-        async with session.get(url, timeout=10) as response:
-            data = await response.json()
-
-            if exchange == "BINANCE":
-                return float(data["price"])
-
-            elif exchange == "KUCOIN":
-                if "data" in data and "price" in data["data"]:
-                    return float(data["data"]["price"])
-                else:
-                    print(f"[ERRO] {exchange} - {moeda}: 'price' ausente")
-                    return None
-    except Exception as e:
-        print(f"[ERRO] {exchange} - {moeda}: {e}")
-        return None
-
-async def verificar_arbitragem():
+async def buscar_oportunidades():
+    global PAUSADO
     async with aiohttp.ClientSession() as session:
-        for moeda in moedas:
-            tasks = []
-            for exchange, url in exchanges.items():
-                full_url = url.format(moeda=moeda)
-                tasks.append(get_price(session, full_url, exchange, moeda))
+        while not PAUSADO:
+            for par in PARES:
+                url = f'https://api.coingecko.com/api/v3/simple/price?ids={par.split("/")[0].lower()}&vs_currencies=usdt&include_market_cap=false&include_24hr_vol=false&include_24hr_change=false&include_last_updated_at=false'
+                try:
+                    async with session.get(url) as response:
+                        if response.status != 200:
+                            continue
+                        data = await response.json()
+                        preco = data.get(par.split("/")[0].lower(), {}).get('usdt')
+                        if preco:
+                            preco_decimal = Decimal(str(preco))
+                            for exchange in EXCHANGES:
+                                preco_simulado = preco_decimal * (Decimal("1.01"))  # simulação
+                                diferenca = abs(preco_decimal - preco_simulado)
+                                lucro_percentual = (diferenca / preco_decimal) * 100
+                                if lucro_percentual >= PORCENTAGEM_MINIMA:
+                                    mensagem = (
+                                        f"💸 Oportunidade de Arbitragem 💸\n\n"
+                                        f"Par: {par}\n"
+                                        f"Exchange A: {exchange}\n"
+                                        f"Exchange B: Simulada\n"
+                                        f"Preço A: {preco_decimal:.4f} USDT\n"
+                                        f"Preço B: {preco_simulado:.4f} USDT\n"
+                                        f"Lucro: {lucro_percentual:.2f}%"
+                                    )
+                                    await enviar_telegram(mensagem)
+                except Exception as e:
+                    print(f"Erro: {e}")
+            await asyncio.sleep(30)
 
-            try:
-                resultados = await asyncio.gather(*tasks)
-                if None in resultados or len(resultados) != 2:
-                    continue
+async def enviar_telegram(mensagem):
+    bot = telegram.Bot(token=TOKEN)
+    await bot.send_message(chat_id=CHAT_ID, text=mensagem)
 
-                preco_binance, preco_kucoin = resultados
+# ==================== COMANDOS TELEGRAM ====================
+async def set_percent(update, context: ContextTypes.DEFAULT_TYPE):
+    global PORCENTAGEM_MINIMA
+    try:
+        valor = context.args[0]
+        PORCENTAGEM_MINIMA = Decimal(valor)
+        await update.message.reply_text(f"🔧 Porcentagem mínima atualizada para {valor}%")
+    except (IndexError, InvalidOperation):
+        await update.message.reply_text("❌ Uso: /set 0.5")
 
-                maior = max(preco_binance, preco_kucoin)
-                menor = min(preco_binance, preco_kucoin)
+async def pause(update, context: ContextTypes.DEFAULT_TYPE):
+    global PAUSADO
+    PAUSADO = True
+    await update.message.reply_text("⏸️ Bot pausado.")
 
-                if menor == 0:
-                    continue
+async def resume(update, context: ContextTypes.DEFAULT_TYPE):
+    global PAUSADO
+    PAUSADO = False
+    await update.message.reply_text("▶️ Bot retomado.")
+    asyncio.create_task(buscar_oportunidades())
 
-                lucro_percent = ((maior - menor) / menor) * 100
-
-                if lucro_percent >= MIN_LUCRO:
-                    exchange_compra = "BINANCE" if preco_binance == menor else "KUCOIN"
-                    exchange_venda = "BINANCE" if preco_binance == maior else "KUCOIN"
-                    mensagem = (
-                        f"💰 *Oportunidade de Arbitragem*\n"
-                        f"Moeda: *{moeda}*\n"
-                        f"Comprar em: *{exchange_compra}* a *${menor:.4f}*\n"
-                        f"Vender em: *{exchange_venda}* a *${maior:.4f}*\n"
-                        f"Lucro estimado: *{lucro_percent:.2f}%*"
-                    )
-                    await bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode="Markdown")
-                    print(f"[ALERTA ENVIADO] {mensagem}")
-
-            except Exception as e:
-                print(f"[ERRO geral] {moeda}: {e}")
-
-async def arbitrage_loop():
-    print("Bot pronto para receber comandos...")
-    while True:
-        await verificar_arbitragem()
-        await asyncio.sleep(30)  # verifica a cada 30 segundos
+# ==================== INICIAR BOT ====================
+async def main():
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("set", set_percent))
+    app.add_handler(CommandHandler("pause", pause))
+    app.add_handler(CommandHandler("resume", resume))
+    asyncio.create_task(buscar_oportunidades())
+    await app.run_polling()
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(arbitrage_loop())
-    except Exception as e:
-        print(f"[ERRO FATAL] {e}")
+    asyncio.run(main())
