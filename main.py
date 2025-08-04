@@ -1,74 +1,58 @@
 import os
 import asyncio
 import aiohttp
-from telegram import Bot
-from telegram.constants import ParseMode
-from telegram.request import AiohttpSession
+import telegram
 
-# Pegando o TOKEN e CHAT_ID das variáveis de ambiente do Heroku
-TOKEN = os.environ.get("TOKEN")
-CHAT_ID = os.environ.get("CHAT_ID")
+# Pegando variáveis de ambiente do Heroku
+TOKEN = os.getenv('TOKEN')
+CHAT_ID = os.getenv('CHAT_ID')
 
-# Usa a sessão do aiohttp integrada com o Telegram Bot
-aiohttp_session = AiohttpSession()
-bot = Bot(token=TOKEN, request=aiohttp_session)
-
-# Pares de criptomoedas
-pairs = [
-    "BTCUSDT", "ETHUSDT", "XRPUSDT", "LTCUSDT", "BCHUSDT",
-    "BNBUSDT", "DOGEUSDT", "ADAUSDT", "SOLUSDT", "DOTUSDT",
-    "AVAXUSDT", "TRXUSDT", "SHIBUSDT", "MATICUSDT", "ATOMUSDT"
+# Lista de exchanges simuladas (substitua com API real se necessário)
+EXCHANGES = [
+    'Binance', 'Coinbase', 'Kraken', 'Bitstamp', 'Huobi', 'KuCoin',
+    'Gate.io', 'Poloniex', 'OKX', 'Bitfinex', 'Bittrex', 'Bybit',
+    'Crypto.com', 'MEXC'
 ]
 
-# URLs das exchanges
-exchanges = {
-    "binance": "https://api.binance.com/api/v3/ticker/price?symbol={}",
-    "coinbase": "https://api.coinbase.com/v2/prices/{}-USDT/spot",
-    "kucoin": "https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={}",
-}
+# Lista de moedas simuladas (substitua com pares reais)
+PAIRS = [
+    'BTC/USDT', 'ETH/USDT', 'LTC/USDT', 'XRP/USDT', 'ADA/USDT',
+    'SOL/USDT', 'DOGE/USDT', 'DOT/USDT', 'MATIC/USDT', 'AVAX/USDT',
+    'SHIB/USDT', 'TRX/USDT', 'LINK/USDT', 'ATOM/USDT', 'BCH/USDT'
+]
 
-async def get_price(session, exchange, symbol):
-    url = exchanges[exchange].format(symbol)
-    try:
-        async with session.get(url) as resp:
-            data = await resp.json()
-            if exchange == "binance":
-                return float(data['price'])
-            elif exchange == "coinbase":
-                return float(data['data']['amount'])
-            elif exchange == "kucoin":
-                return float(data['data']['price'])
-    except Exception:
-        return None
+async def buscar_arquivo_ficticio_de_arbitragem():
+    oportunidades = []
+    for par in PAIRS:
+        for i in range(len(EXCHANGES)):
+            for j in range(i + 1, len(EXCHANGES)):
+                preco_a = 100 + i  # simulação
+                preco_b = 100 + j  # simulação
+                diferenca = abs(preco_a - preco_b)
+                if diferenca >= 5:  # margem mínima de arbitragem fictícia
+                    oportunidades.append(f'Oportunidade: {par} em {EXCHANGES[i]} e {EXCHANGES[j]} | Diferença: {diferenca}')
+    return oportunidades
 
-async def check_arbitrage():
-    async with aiohttp.ClientSession() as session:
-        for pair in pairs:
-            prices = {}
-            for exchange in exchanges:
-                price = await get_price(session, exchange, pair)
-                if price:
-                    prices[exchange] = price
-            if len(prices) >= 2:
-                min_ex = min(prices, key=prices.get)
-                max_ex = max(prices, key=prices.get)
-                min_price = prices[min_ex]
-                max_price = prices[max_ex]
-                profit = ((max_price - min_price) / min_price) * 100
-                if profit >= 1:
-                    message = (
-                        f"💰 <b>Oportunidade de arbitragem!</b>\n\n"
-                        f"🪙 Par: <code>{pair}</code>\n"
-                        f"🔻 Comprar: <b>{min_ex}</b> a <code>{min_price:.2f}</code>\n"
-                        f"🔺 Vender: <b>{max_ex}</b> a <code>{max_price:.2f}</code>\n"
-                        f"📈 Lucro estimado: <b>{profit:.2f}%</b>"
-                    )
-                    await bot.send_message(chat_id=CHAT_ID, text=message, parse_mode=ParseMode.HTML)
+async def enviar_mensagem(mensagem):
+    bot = telegram.Bot(token=TOKEN)
+    await bot.send_message(chat_id=CHAT_ID, text=mensagem)
+
+async def verificar_arbitragem():
+    oportunidades = await buscar_arquivo_ficticio_de_arbitragem()
+    if oportunidades:
+        for oportunidade in oportunidades:
+            await enviar_mensagem(oportunidade)
+    else:
+        await enviar_mensagem('Nenhuma oportunidade de arbitragem encontrada.')
 
 async def main():
     while True:
-        await check_arbitrage()
-        await asyncio.sleep(60)
+        try:
+            await verificar_arbitragem()
+            await asyncio.sleep(60)  # espera 60 segundos para nova análise
+        except Exception as e:
+            await enviar_mensagem(f'Erro detectado: {e}')
+            await asyncio.sleep(60)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     asyncio.run(main())
