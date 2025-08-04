@@ -1,5 +1,6 @@
 aiohttp
-python-telegram-bot[job-queue
+python-telegram-bot
+APScheduler
 Flask
 gunicorn
 python-dotenv
