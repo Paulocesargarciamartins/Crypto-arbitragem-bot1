@@ -111,7 +111,13 @@ async def main():
     logger.info("Bot iniciado com sucesso.")
     await application.run_polling()
 
-# MUDANÇA NO BLOCO DE INICIALIZAÇÃO
+# MUDANÇA NO BLOCO DE INICIALIZAÇÃO PARA GERENCIAMENTO MANUAL DO LOOP
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+    try:
+        loop.run_until_complete(main())
+    except (KeyboardInterrupt, SystemExit):
+        pass
+    finally:
+        if not loop.is_running():
+            loop.close()
