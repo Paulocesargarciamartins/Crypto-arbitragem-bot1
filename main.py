@@ -19,8 +19,9 @@ DEFAULT_TRADE_AMOUNT_USD = 50.0 # Quantidade de USD para verificar liquidez
 DEFAULT_FEE_PERCENTAGE = 0.1 # Taxa de negociação média por lado (0.1% é comum)
 
 # IMPORTANTE: Limite máximo de lucro bruto para validação de dados.
-# Qualquer oportunidade com lucro bruto acima de 5.0% será ignorada.
-MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 5.0 
+# Retornado para 500.0% para não restringir o bot, conforme solicitado.
+# Lucros acima disso ainda são considerados anomalias de dados.
+MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 500.0 
 
 # Exchanges confiáveis para monitorar (agora 17, Coinex removida)
 EXCHANGES_LIST = [
