@@ -394,9 +394,7 @@ async def main():
     for exchange in global_exchanges_instances.values():
         try:
             await exchange.close()
-        except RuntimeError as e:
-            logger.warning(f"Erro ao fechar conexão da exchange {exchange.id} (RuntimeError): {e}. Pode ocorrer durante o desligamento do loop.")
-        except Exception as e:
+        except Exception as e: # Simplificado para um único except
             logger.error(f"Erro inesperado ao fechar conexão da exchange {exchange.id}: {e}")
 
 if __name__ == "__main__":
