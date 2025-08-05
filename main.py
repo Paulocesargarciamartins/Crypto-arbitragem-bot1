@@ -5,6 +5,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, JobQu
 import ccxt.async_support as ccxt
 import os
 import nest_asyncio
+from datetime import datetime
 
 # Aplica o patch para permitir loops aninhados,
 # corrigindo o problema no ambiente Heroku
@@ -66,22 +67,56 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- Funções do Bot ---
+# --- Funções Auxiliares para Busca Concorrente ---
+async def fetch_market_data_for_exchange(exchange, pair, ex_id):
+    """
+    Busca dados de mercado para um par específico em uma única exchange.
+    Retorna uma tupla (ex_id, market_data) ou None em caso de erro/dados inválidos.
+    """
+    try:
+        if pair in exchange.markets and exchange.has['fetchOrderBook']:
+            # Busca o livro de ofertas para verificar liquidez
+            # Aumentado o limite para 100 para uma visão mais robusta e compatibilidade com Kucoin
+            order_book = await exchange.fetch_order_book(pair, limit=100) 
+            
+            if order_book and order_book['bids'] and order_book['asks']:
+                best_bid = order_book['bids'][0][0] # Melhor preço de compra (para quem vende)
+                best_bid_volume = order_book['bids'][0][1]
+                best_ask = order_book['asks'][0][0] # Melhor preço de venda (para quem compra)
+                best_ask_volume = order_book['asks'][0][1]
 
-# Função para checar arbitragem entre exchanges
+                # Sanity check: Preços devem ser positivos e ask >= bid
+                if best_bid > 0 and best_ask > 0 and best_ask >= best_bid:
+                    return (ex_id, {
+                        'bid': best_bid,
+                        'bid_volume': best_bid_volume,
+                        'ask': best_ask,
+                        'ask_volume': best_ask_volume,
+                    })
+                else:
+                    logger.debug(f"Dados inválidos para {pair} em {ex_id} (preço não positivo ou ask < bid): Bid={best_bid}, Ask={best_ask}")
+            else:
+                logger.debug(f"Livro de ofertas vazio ou inválido para {pair} em {ex_id}")
+        else:
+            logger.debug(f"Par {pair} não disponível ou fetchOrderBook não suportado em {ex_id}")
+    except ccxt.NetworkError as e:
+        logger.warning(f"Erro de rede ao buscar {pair} em {ex_id}: {e}")
+    except ccxt.ExchangeError as e:
+        logger.warning(f"Erro da exchange ao buscar {pair} em {ex_id}: {e}")
+    except Exception as e:
+        logger.warning(f"Erro inesperado ao buscar {pair} em {ex_id}: {e}")
+    return None # Retorna None se a busca falhou ou os dados são inválidos
+
+# Função principal para checar arbitragem
 async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
     bot = context.bot
     job = context.job
 
-    # Obtém o chat_id para enviar mensagens.
-    # Se o bot for reiniciado e ninguém usou /start, pode ser None.
-    # Idealmente, você persistiria o chat_id em um banco de dados.
     chat_id = context.bot_data.get('admin_chat_id')
     if not chat_id:
         logger.warning("Nenhum chat_id de administrador configurado. Use /start para registrar.")
         return
 
-    # Obtém o lucro mínimo e o valor de trade do bot_data, ou usa os defaults
     lucro_minimo_porcentagem = context.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)
     trade_amount_usd = context.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD)
     fee_percentage = context.bot_data.get('fee_percentage', DEFAULT_FEE_PERCENTAGE)
@@ -96,13 +131,13 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
                 exchange_class = getattr(ccxt, ex_id)
                 exchange = exchange_class({
                     'enableRateLimit': True, # Garante que o ccxt respeite os limites de taxa da API
-                    'timeout': 10000, # 10 segundos de timeout
+                    'timeout': 5000, # Reduzido timeout para 5 segundos para requisições mais rápidas
                 })
                 await exchange.load_markets()
                 exchanges_instances[ex_id] = exchange
             except Exception as e:
                 logger.warning(f"Não foi possível carregar a exchange {ex_id}: {e}")
-                if ex_id in exchanges_instances: # Remove se houve erro após inicialização parcial
+                if ex_id in exchanges_instances:
                     await exchanges_instances[ex_id].close()
                     del exchanges_instances[ex_id]
         
@@ -113,43 +148,25 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
 
         # Itera sobre cada par para encontrar oportunidades
         for pair in PAIRS:
-            market_data = {} # Armazena bid/ask/volume para cada exchange para o par atual
-            
+            market_data_tasks = []
             for ex_id, exchange in exchanges_instances.items():
-                try:
-                    # Verifica se o par existe na exchange e se suporta fetch_order_book
-                    if pair in exchange.markets and exchange.has['fetchOrderBook']:
-                        # Busca o livro de ofertas para verificar liquidez
-                        # Aumentado o limite para 100 para uma visão mais robusta e compatibilidade com Kucoin
-                        order_book = await exchange.fetch_order_book(pair, limit=100) 
-                        
-                        if order_book and order_book['bids'] and order_book['asks']:
-                            best_bid = order_book['bids'][0][0] # Melhor preço de compra (para quem vende)
-                            best_bid_volume = order_book['bids'][0][1]
-                            best_ask = order_book['asks'][0][0] # Melhor preço de venda (para quem compra)
-                            best_ask_volume = order_book['asks'][0][1]
+                # Cria uma tarefa para buscar os dados de cada exchange para o par atual
+                market_data_tasks.append(
+                    fetch_market_data_for_exchange(exchange, pair, ex_id)
+                )
+            
+            # Executa todas as tarefas de busca para o par atual CONCORRENTEMENTE
+            results = await asyncio.gather(*market_data_tasks, return_exceptions=True)
 
-                            # Sanity check: Preços devem ser positivos e ask >= bid
-                            if best_bid > 0 and best_ask > 0 and best_ask >= best_bid:
-                                market_data[ex_id] = {
-                                    'bid': best_bid,
-                                    'bid_volume': best_bid_volume,
-                                    'ask': best_ask,
-                                    'ask_volume': best_ask_volume,
-                                }
-                            else:
-                                logger.debug(f"Dados inválidos para {pair} em {ex_id} (preço não positivo ou ask < bid): Bid={best_bid}, Ask={best_ask}")
-                        else:
-                            logger.debug(f"Livro de ofertas vazio ou inválido para {pair} em {ex_id}")
-                    else:
-                        logger.debug(f"Par {pair} não disponível ou fetchOrderBook não suportado em {ex_id}")
-                except ccxt.NetworkError as e:
-                    logger.warning(f"Erro de rede ao buscar {pair} em {ex_id}: {e}")
-                except ccxt.ExchangeError as e:
-                    logger.warning(f"Erro da exchange ao buscar {pair} em {ex_id}: {e}")
-                except Exception as e:
-                    logger.warning(f"Erro inesperado ao buscar {pair} em {ex_id}: {e}")
-
+            market_data = {}
+            for result in results:
+                if isinstance(result, Exception):
+                    # Loga a exceção mas não interrompe o processo principal
+                    logger.warning(f"Erro durante a busca concorrente de dados: {result}")
+                elif result: # result é (ex_id, data)
+                    ex_id, data = result
+                    market_data[ex_id] = data
+            
             # Se não houver dados de pelo menos duas exchanges para o par, pular
             if len(market_data) < 2:
                 continue
@@ -231,7 +248,6 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
             await bot.send_message(chat_id=chat_id, text=f"Erro crítico na checagem de arbitragem: {e}")
     finally:
         # Correção: Adiciona tratamento de erro para RuntimeError ao fechar exchanges
-        # Isso evita que o bot trave se o loop de eventos já estiver fechando.
         for exchange in exchanges_instances.values():
             try:
                 await exchange.close()
