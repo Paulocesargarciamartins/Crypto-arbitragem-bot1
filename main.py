@@ -22,9 +22,33 @@ EXCHANGES_LIST = [
     'bitget', 'ascendex', 'bibox', 'bitflyer', 'digifinex'
 ]
 
-# Pares USDT (exemplo curto, você pode ampliar)
+# 150 Pares USDT (com base em dados de mercado recentes)
 PAIRS = [
-    "BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "DOGE/USDT", "ADA/USDT", "LTC/USDT",
+    "BTC/USDT", "ETH/USDT", "XRP/USDT", "USDT/USDT", "BNB/USDT", "SOL/USDT", 
+    "USDC/USDT", "STETH/USDT", "DOGE/USDT", "TRX/USDT", "ADA/USDT", "XLM/USDT", 
+    "BCH/USDT", "SUI/USDT", "LINK/USDT", "HBAR/USDT", "AVAX/USDT", "LTC/USDT", 
+    "SHIB/USDT", "UNI/USDT", "XMR/USDT", "DOT/USDT", "PEPE/USDT", "AAVE/USDT", 
+    "CRO/USDT", "DAI/USDT", "ETC/USDT", "ONDO/USDT", "NEAR/USDT", "OKB/USDT", 
+    "APT/USDT", "ICP/USDT", "ALGO/USDT", "ATOM/USDT", "WBTC/USDT", "TON/USDT", 
+    "USDS/USDT", "ENA/USDT", "TAO/USDT", "MNT/USDT", "JITOSOL/USDT", "KAS/USDT", 
+    "PENGU/USDT", "ARB/USDT", "BONK/USDT", "RENDER/USDT", "POL/USDT", "WLD/USDT", 
+    "STORY/USDT", "TRUMP/USDT", "SEI/USDT", "SKY/USDT", "HYPE/USDT", "WBETH/USDT", 
+    "MKR/USDT", "FIL/USDT", "OP/USDT", "IOTA/USDT", "DASH/USDT", "NEXO/USDT", 
+    "SUSHI/USDT", "BGB/USDT", "WIF/USDT", "FLOW/USDT", "IMX/USDT", "RUNE/USDT", 
+    "LDO/USDT", "FET/USDT", "GRT/USDT", "FTM/USDT", "QNT/USDT", "STRK/USDT", 
+    "VET/USDT", "INJ/USDT", "DYDX/USDT", "EGLD/USDT", "JUP/USDT", "GALA/USDT", 
+    "AXS/USDT", "THETA/USDT", "MINA/USDT", "ENJ/USDT", "CHZ/USDT", "YFI/USDT", 
+    "GMX/USDT", "ZEC/USDT", "ZIL/USDT", "GMT/USDT", "WAVES/USDT", "KLAY/USDT", 
+    "KAVA/USDT", "CELO/USDT", "XEC/USDT", "HNT/USDT", "RSR/USDT", "RVN/USDT", 
+    "BAT/USDT", "DCR/USDT", "DGB/USDT", "XEM/USDT", "SC/USDT", "ZEN/USDT", 
+    "COMP/USDT", "SNX/USDT", "UMA/USDT", "CRV/USDT", "KNC/USDT", "BAL/USDT", 
+    "ZRX/USDT", "OGN/USDT", "RLC/USDT", "BAND/USDT", "TOMO/USDT", "AR/USDT", 
+    "PERP/USDT", "LINA/USDT", "ANKR/USDT", "OCEAN/USDT", "SFP/USDT", "ONE/USDT", 
+    "PHA/USDT", "CKB/USDT", "CTK/USDT", "YFII/USDT", "BOND/USDT", "UTK/USDT", 
+    "CVC/USDT", "IRIS/USDT", "NULS/USDT", "NKN/USDT", "STX/USDT", "DODO/USDT", 
+    "NMR/USDT", "MCO/USDT", "LPT/USDT", "SKL/USDT", "REQ/USDT", "CQT/USDT", 
+    "WTC/USDT", "TCT/USDT", "COTI/USDT", "MDT/USDT", "TFUEL/USDT", "TUSD/USDT", 
+    "SRM/USDT", "GLM/USDT", "MANA/USDT", "SAND/USDT", "ICP/USDT", "APE/USDT"
 ]
 
 logging.basicConfig(
@@ -94,7 +118,6 @@ async def setlucro(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # FUNÇÃO PRINCIPAL DO BOT
 async def main():
-    # A ÚNICA MUDANÇA É AQUI: ADICIONAR job_queue(JobQueue())
     application = ApplicationBuilder().token(TOKEN).job_queue(JobQueue()).build()
 
     application.add_handler(CommandHandler("start", start))
