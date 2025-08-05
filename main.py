@@ -1,14 +1,13 @@
 import asyncio
 import aiohttp
-import telegram
-from telegram.ext import ApplicationBuilder, CommandHandler
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# --- CONFIGURAÇÃO DO BOT ---
+# Configurações
 TOKEN = '7218062934:AAEcgNpqN3itPQ-GzotVtR_eQc7g9FynbzQ'
 CHAT_ID = '1093248456'
-lucro_minimo = 1.0  # % mínima para alertar
+lucro_minimo = 1.0
 
-# --- LISTA DE EXCHANGES CONFIÁVEIS ---
 EXCHANGES = [
     'binance', 'kucoin', 'coinbasepro', 'kraken', 'bitfinex',
     'bittrex', 'bitstamp', 'okx', 'bybit', 'gate',
@@ -16,7 +15,6 @@ EXCHANGES = [
     'lbank', 'huobi', 'p2pb2b', 'bibox', 'bigone'
 ]
 
-# --- PAR DE MOEDAS USDT ---
 PAIRS = [
     'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'XRP/USDT', 'ADA/USDT',
     'SOL/USDT', 'DOGE/USDT', 'DOT/USDT', 'AVAX/USDT', 'TRX/USDT',
@@ -24,18 +22,22 @@ PAIRS = [
     'XLM/USDT', 'FIL/USDT', 'ETC/USDT', 'EGLD/USDT', 'APE/USDT'
 ]
 
-# --- FUNÇÃO PARA CONSULTAR PREÇOS ---
+# Função para pegar preços simulados (substitua por uma API real, se quiser)
 async def get_price(session, exchange, pair):
     try:
         url = f'https://api.coingecko.com/api/v3/simple/price?ids={pair.split("/")[0].lower()}&vs_currencies=usdt'
         async with session.get(url) as resp:
             data = await resp.json()
             return data[pair.split("/")[0].lower()]['usdt']
-    except:
+    except Exception:
         return None
 
-# --- FUNÇÃO PARA CALCULAR ARBITRAGEM ---
-async def verificar_arbitragem():
+# Envia mensagem via app do Telegram (Application)
+async def send_telegram_message(app, msg):
+    await app.bot.send_message(chat_id=CHAT_ID, text=msg)
+
+# Loop de arbitragem
+async def verificar_arbitragem(app):
     async with aiohttp.ClientSession() as session:
         for pair in PAIRS:
             prices = {}
@@ -43,7 +45,8 @@ async def verificar_arbitragem():
                 price = await get_price(session, exchange, pair)
                 if price: prices[exchange] = price
 
-            if len(prices) < 2: continue
+            if len(prices) < 2:
+                continue
 
             menor = min(prices.values())
             maior = max(prices.values())
@@ -53,45 +56,39 @@ async def verificar_arbitragem():
                 menor_ex = min(prices, key=prices.get)
                 maior_ex = max(prices, key=prices.get)
                 msg = (
-                    f"📈 Oportunidade de arbitragem detectada!\n\n"
-                    f"Par: {pair}\n"
+                    f"📈 Oportunidade de arbitragem!\n\n"
+                    f"{pair}\n"
                     f"Comprar em: {menor_ex} (💰 {menor:.2f})\n"
                     f"Vender em: {maior_ex} (💰 {maior:.2f})\n"
-                    f"Lucro estimado: {lucro:.2f}%"
+                    f"Lucro: {lucro:.2f}%"
                 )
-                await send_telegram_message(msg)
+                await send_telegram_message(app, msg)
 
-# --- ENVIAR MENSAGEM PARA O TELEGRAM ---
-async def send_telegram_message(msg):
-    bot = telegram.Bot(token=TOKEN)
-    await bot.send_message(chat_id=CHAT_ID, text=msg)
-
-# --- COMANDO /set PARA AJUSTAR % PELO TELEGRAM ---
-async def set_command(update, context):
+# Comando /set para alterar lucro mínimo
+async def set_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global lucro_minimo
     try:
         novo_valor = float(context.args[0])
         lucro_minimo = novo_valor
-        await update.message.reply_text(f"Novo valor de lucro mínimo definido para {lucro_minimo:.2f}%")
+        await update.message.reply_text(f"Lucro mínimo alterado para {lucro_minimo:.2f}%")
     except:
         await update.message.reply_text("Uso correto: /set 2.5")
 
-# --- MAIN LOOP COM VERIFICAÇÃO CONTÍNUA ---
-async def main_loop():
-    while True:
-        try:
-            await verificar_arbitragem()
-        except Exception as e:
-            await send_telegram_message(f"Erro no bot: {str(e)}")
-        await asyncio.sleep(60)
-
-# --- INICIALIZAÇÃO DO BOT ---
-def start_bot():
+# Inicialização principal
+async def main():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("set", set_command))
-    app.run_polling()
+
+    async def loop_arbitragem():
+        while True:
+            try:
+                await verificar_arbitragem(app)
+            except Exception as e:
+                await send_telegram_message(app, f"Erro: {str(e)}")
+            await asyncio.sleep(60)
+
+    asyncio.create_task(loop_arbitragem())
+    await app.run_polling()
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.create_task(main_loop())
-    start_bot()
+    asyncio.run(main())
