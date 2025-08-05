@@ -388,14 +388,16 @@ async def main():
 
     logger.info("Bot iniciado com sucesso e aguardando mensagens...")
     # Inicia o polling para receber atualizações do Telegram
-    await application.run_polling(allowed_updates=Update.ALL_TYPES)
-
-    # Fechar todas as conexões das exchanges quando o bot for encerrado
-    for exchange in global_exchanges_instances.values():
-        try:
-            await exchange.close()
-        except Exception as e: # Simplificado para um único except
-            logger.error(f"Erro inesperado ao fechar conexão da exchange {exchange.id}: {e}")
+    try:
+        await application.run_polling(allowed_updates=Update.ALL_TYPES)
+    finally: # O bloco finally é sempre executado, mesmo se houver exceções
+        # Fechar todas as conexões das exchanges quando o bot for encerrado
+        logger.info("Fechando conexões das exchanges...")
+        for exchange in global_exchanges_instances.values():
+            try:
+                await exchange.close()
+            except Exception as e:
+                logger.error(f"Erro inesperado ao fechar conexão da exchange {exchange.id}: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
