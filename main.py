@@ -1,130 +1,78 @@
-import os
-import logging
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import asyncio
 import aiohttp
+import telegram
+import time
 
-# Configuração básica do logging
-logging.basicConfig(
-    format='[%(levelname)s] %(asctime)s - %(message)s',
-    level=logging.DEBUG
-)
-logger = logging.getLogger(__name__)
+# Configuração do Telegram
+TOKEN = '7218062934:AAEcgNpqN3itPQ-GzotVtR_eQc7g9FynbzQ'
+CHAT_ID = '1093248456'
+bot = telegram.Bot(token=TOKEN)
 
-TOKEN = os.environ.get("TOKEN")
-CHAT_ID = os.environ.get("CHAT_ID", "1093248456")
-
-# Parâmetros
-DEFAULT_MIN_PROFIT = 1.0  # lucro mínimo em %
-
-# Lista de pares USDT (exemplo com 15 pares, pode expandir)
-pairs = [
-    "BTCUSDT", "ETHUSDT", "XRPUSDT", "LTCUSDT", "BCHUSDT",
-    "BNBUSDT", "DOGEUSDT", "ADAUSDT", "SOLUSDT", "DOTUSDT",
-    "AVAXUSDT", "TRXUSDT", "SHIBUSDT", "MATICUSDT", "ATOMUSDT"
+# Exchanges e pares
+exchanges = [
+    'binance', 'kucoin', 'coinbase', 'mexc', 'bitget', 'bitfinex', 'gate',
+    'kraken', 'bybit', 'okx', 'poloniex', 'bitmart', 'bitstamp', 'lbank'
 ]
 
-# Exchanges e seus endpoints para obter preço
-exchanges = {
-    "Binance": "https://api.binance.com/api/v3/ticker/price?symbol={}",
-    "Coinbase": "https://api.coinbase.com/v2/prices/{}-USDT/spot",
-    "KuCoin": "https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={}",
-    "Bitstamp": "https://www.bitstamp.net/api/v2/ticker/{}.json",
-    "MercadoBitcoin": "https://www.mercadobitcoin.net/api/{}/ticker/",
-}
+symbols = [
+    'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT',
+    'ADA/USDT', 'AVAX/USDT', 'MATIC/USDT', 'DOT/USDT', 'TRX/USDT',
+    'UNI/USDT', 'LTC/USDT', 'ETC/USDT', 'FIL/USDT', 'NEAR/USDT',
+    'XLM/USDT', 'HBAR/USDT', 'ICP/USDT', 'SAND/USDT', 'APT/USDT',
+    'INJ/USDT', 'IMX/USDT', 'GRT/USDT', 'EGLD/USDT', 'AAVE/USDT',
+    'RNDR/USDT', 'FTM/USDT', 'RPL/USDT', 'QNT/USDT', 'KLAY/USDT',
+    'CRV/USDT', 'ZEC/USDT', 'ENJ/USDT', 'BAND/USDT', 'SNX/USDT',
+    'YFI/USDT', 'BAT/USDT', 'ANKR/USDT', '1INCH/USDT', 'COMP/USDT',
+    'SUSHI/USDT', 'STORJ/USDT', 'ZEN/USDT', 'CELR/USDT', 'CKB/USDT',
+    'OMG/USDT', 'WAVES/USDT', 'BAL/USDT', 'CVC/USDT', 'GALA/USDT',
+    'OP/USDT', 'AR/USDT', 'PEPE/USDT', 'JASMY/USDT', 'SHIB/USDT',
+    'ALGO/USDT', 'ZIL/USDT', 'SKL/USDT', 'FLOW/USDT', 'XEC/USDT',
+    'MASK/USDT', 'CHZ/USDT', 'DASH/USDT', 'PYR/USDT', 'VET/USDT',
+    'CRO/USDT', 'LRC/USDT', 'GLM/USDT', 'CTSI/USDT', 'MTL/USDT',
+    'NMR/USDT', 'KSM/USDT', 'RAY/USDT', 'SXP/USDT', 'KNC/USDT',
+    'UMA/USDT', 'AUDIO/USDT', 'DODO/USDT', 'REQ/USDT', 'COTI/USDT',
+    'TRB/USDT', 'BNT/USDT', 'C98/USDT', 'REEF/USDT', 'BADGER/USDT',
+    'ORN/USDT', 'TWT/USDT', 'SPELL/USDT', 'FET/USDT', 'ILV/USDT',
+    'LPT/USDT', 'GHST/USDT', 'PLA/USDT', 'TOMO/USDT', 'UOS/USDT',
+    'XNO/USDT', 'VRA/USDT', 'NKN/USDT', 'MDT/USDT', 'PERP/USDT'
+]
 
-# Variável global para lucro mínimo, atualizável via comando
-min_profit = DEFAULT_MIN_PROFIT
+import ccxt.async_support as ccxt
 
-async def get_price(session: aiohttp.ClientSession, exchange: str, symbol: str):
-    url = exchanges[exchange].format(symbol)
+async def fetch_price(exchange_id, symbol):
     try:
-        async with session.get(url) as resp:
-            if resp.status != 200:
-                logger.warning(f"[Erro] {exchange}: status {resp.status} para {url}")
-                return None
-            data = await resp.json()
-            if exchange == "Binance":
-                return float(data['price'])
-            elif exchange == "Coinbase":
-                return float(data['data']['amount'])
-            elif exchange == "KuCoin":
-                return float(data['data']['price'])
-            elif exchange == "Bitstamp":
-                return float(data['last'])
-            elif exchange == "MercadoBitcoin":
-                return float(data['ticker']['last'])
-    except Exception as e:
-        logger.warning(f"[Erro] {exchange}: {e}")
+        exchange = getattr(ccxt, exchange_id)()
+        ticker = await exchange.fetch_ticker(symbol)
+        await exchange.close()
+        return ticker['last']
+    except:
         return None
 
-async def check_arbitrage(bot):
-    async with aiohttp.ClientSession() as session:
-        for pair in pairs:
-            prices = {}
-            for exchange in exchanges:
-                price = await get_price(session, exchange, pair)
-                if price:
-                    prices[exchange] = price
-            if len(prices) >= 2:
-                min_ex = min(prices, key=prices.get)
-                max_ex = max(prices, key=prices.get)
-                min_price = prices[min_ex]
-                max_price = prices[max_ex]
-                profit = ((max_price - min_price) / min_price) * 100
-                logger.debug(f"{pair} - Preços: {prices}")
-                if profit >= min_profit:
-                    message = (
-                        f"💰 Oportunidade de arbitragem!\n\n"
-                        f"🪙 Par: {pair}\n"
-                        f"🔻 Comprar: {min_ex} a {min_price:.2f}\n"
-                        f"🔺 Vender: {max_ex} a {max_price:.2f}\n"
-                        f"📈 Lucro estimado: {profit:.2f}%"
-                    )
-                    try:
-                        await bot.send_message(chat_id=CHAT_ID, text=message)
-                        logger.info(f"Alerta enviado para {pair} com lucro {profit:.2f}%")
-                    except Exception as e:
-                        logger.error(f"Erro ao enviar mensagem Telegram: {e}")
+async def check_arbitrage():
+    while True:
+        try:
+            for symbol in symbols:
+                prices = {}
+                for exchange_id in exchanges:
+                    price = await fetch_price(exchange_id, symbol)
+                    if price:
+                        prices[exchange_id] = price
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Olá! Sou seu bot de arbitragem.\n"
-        "Use /setprofit <valor> para definir o lucro mínimo em %.\n"
-        "Exemplo: /setprofit 1.5"
-    )
+                if len(prices) >= 2:
+                    max_exchange = max(prices, key=prices.get)
+                    min_exchange = min(prices, key=prices.get)
+                    max_price = prices[max_exchange]
+                    min_price = prices[min_exchange]
+                    profit = (max_price - min_price) / min_price * 100
 
-async def set_profit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global min_profit
-    try:
-        if len(context.args) != 1:
-            raise ValueError("Número errado de argumentos")
-        value = float(context.args[0].replace(',', '.'))
-        if value <= 0:
-            raise ValueError("Lucro deve ser maior que zero")
-        min_profit = value
-        await update.message.reply_text(f"Lucro mínimo configurado para {min_profit}%")
-    except Exception:
-        await update.message.reply_text("Uso correto: /setprofit <valor_em_porcentagem>")
+                    if profit >= 2:  # Arbitragem com lucro acima de 2%
+                        msg = f"🔁 Arbitragem: {symbol}\n🔼 Comprar: {min_exchange} - ${min_price:.2f}\n🔽 Vender: {max_exchange} - ${max_price:.2f}\n📊 Lucro: {profit:.2f}%"
+                        await bot.send_message(chat_id=CHAT_ID, text=msg)
 
-async def arbitrage_job(app):
-    await check_arbitrage(app.bot)
+            await asyncio.sleep(60)
 
-async def periodic_arbitrage(context: ContextTypes.DEFAULT_TYPE):
-    await check_arbitrage(context.bot)
+        except Exception as e:
+            print(f"Erro: {e}")
+            await asyncio.sleep(60)
 
-async def main():
-    app = ApplicationBuilder().token(TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("setprofit", set_profit))
-
-    # Executa a checagem a cada 60 segundos
-    app.job_queue.run_repeating(periodic_arbitrage, interval=60, first=5)
-
-    logger.info("Bot iniciado")
-    await app.run_polling()
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+asyncio.run(check_arbitrage())
