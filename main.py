@@ -5,7 +5,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, JobQu
 import ccxt.async_support as ccxt
 import os
 import nest_asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Aplica o patch para permitir loops aninhados,
 # corrigindo o problema no ambiente Heroku
@@ -18,9 +18,18 @@ DEFAULT_LUCRO_MINIMO_PORCENTAGEM = 2.0
 DEFAULT_TRADE_AMOUNT_USD = 50.0 # Quantidade de USD para verificar liquidez
 DEFAULT_FEE_PERCENTAGE = 0.1 # Taxa de negociação média por lado (0.1% é comum)
 
-# IMPORTANTE: Limite máximo de lucro bruto para validação de dados.
-# Ajustado para 100.0% conforme solicitado.
+# Limite máximo de lucro bruto para validação de dados.
+# Mantido em 100.0% conforme solicitado.
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0 
+
+# NOVO: Período de cooldown para evitar alertas repetidos para a mesma oportunidade (em segundos).
+# Se uma oportunidade idêntica (ou muito similar) foi alertada nos últimos 300 segundos (5 minutos),
+# não alertar novamente, a menos que haja uma mudança significativa.
+COOLDOWN_PERIOD_FOR_ALERTS = 300 
+# Tolerância para considerar preços "iguais" para o cooldown (0.01% de diferença)
+PRICE_COOLDOWN_TOLERANCE_PERCENT = 0.01 
+# Porcentagem de mudança no lucro líquido para re-alertar uma oportunidade existente antes do cooldown expirar
+PROFIT_CHANGE_ALERT_THRESHOLD_PERCENT = 0.5 # Ex: se o lucro mudar em 0.5% ou mais, alerta novamente
 
 # Exchanges confiáveis para monitorar (agora 17, Coinex removida)
 EXCHANGES_LIST = [
@@ -57,7 +66,7 @@ PAIRS = [
     "CVC/USDT", "IRIS/USDT", "NULS/USDT", "NKN/USDT", "STX/USDT", "DODO/USDT", 
     "NMR/USDT", "MCO/USDT", "LPT/USDT", "SKL/USDT", "REQ/USDT", "CQT/USDT", 
     "WTC/USDT", "TCT/USDT", "COTI/USDT", "MDT/USDT", "TFUEL/USDT", "TUSD/USDT", 
-    "SRM/USDT", "GLM/USDT" # Limitado a 100 pares
+    "SRM/USDT", "GLM/USDT"
 ]
 
 # Configuração de logging
@@ -75,8 +84,6 @@ async def fetch_market_data_for_exchange(exchange, pair, ex_id):
     """
     try:
         if pair in exchange.markets and exchange.has['fetchOrderBook']:
-            # Busca o livro de ofertas para verificar liquidez
-            # Aumentado o limite para 100 para uma visão mais robusta e compatibilidade com Kucoin
             order_book = await exchange.fetch_order_book(pair, limit=100) 
             
             if order_book and order_book['bids'] and order_book['asks']:
@@ -92,6 +99,7 @@ async def fetch_market_data_for_exchange(exchange, pair, ex_id):
                         'bid_volume': best_bid_volume,
                         'ask': best_ask,
                         'ask_volume': best_ask_volume,
+                        'timestamp': order_book.get('timestamp') # Inclui o timestamp original
                     })
                 else:
                     logger.debug(f"Dados inválidos para {pair} em {ex_id} (preço não positivo ou ask < bid): Bid={best_bid}, Ask={best_ask}")
@@ -121,6 +129,12 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
     trade_amount_usd = context.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD)
     fee_percentage = context.bot_data.get('fee_percentage', DEFAULT_FEE_PERCENTAGE)
 
+    # NOVO: Inicializa o dicionário para rastrear as oportunidades ativas e os últimos alertas
+    if 'active_opportunities' not in context.bot_data:
+        context.bot_data['active_opportunities'] = {} # { (pair, buy_ex, sell_ex): { 'buy_price': float, 'sell_price': float, 'net_profit': float, 'last_alert_time': datetime } }
+
+    current_scan_opportunities = {} # Oportunidades válidas encontradas nesta varredura
+
     logger.info(f"Iniciando checagem de arbitragem. Lucro mínimo: {lucro_minimo_porcentagem}%, Volume de trade: {trade_amount_usd} USD")
 
     exchanges_instances = {}
@@ -147,32 +161,26 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
             return
 
         # Itera sobre cada par para encontrar oportunidades
-        for pair in PAIRS: # Agora iterando sobre a lista limitada de 100 pares
+        for pair in PAIRS:
             market_data_tasks = []
             for ex_id, exchange in exchanges_instances.items():
-                # Cria uma tarefa para buscar os dados de cada exchange para o par atual
                 market_data_tasks.append(
                     fetch_market_data_for_exchange(exchange, pair, ex_id)
                 )
             
-            # Executa todas as tarefas de busca para o par atual CONCORRENTEMENTE
-            # return_exceptions=True garante que se uma tarefa falhar, as outras continuam.
             results = await asyncio.gather(*market_data_tasks, return_exceptions=True)
 
             market_data = {}
             for result in results:
                 if isinstance(result, Exception):
-                    # Loga a exceção mas não interrompe o processo principal
                     logger.warning(f"Erro durante a busca concorrente de dados: {result}")
-                elif result: # result é (ex_id, data)
+                elif result:
                     ex_id, data = result
                     market_data[ex_id] = data
             
-            # Se não houver dados de pelo menos duas exchanges para o par, pular
             if len(market_data) < 2:
                 continue
 
-            # Encontrar a melhor oportunidade de arbitragem para o par
             best_buy_ex = None
             best_buy_price = float('inf')
             best_buy_volume = 0
@@ -182,43 +190,33 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
             best_sell_volume = 0
 
             for ex_id, data in market_data.items():
-                # Encontrar a exchange com o menor preço de compra (ask)
                 if data['ask'] < best_buy_price:
                     best_buy_price = data['ask']
                     best_buy_ex = ex_id
                     best_buy_volume = data['ask_volume']
 
-                # Encontrar a exchange com o maior preço de venda (bid)
                 if data['bid'] > best_sell_price:
                     best_sell_price = data['bid']
                     best_sell_ex = ex_id
                     best_sell_volume = data['bid_volume']
 
-            # Se as melhores exchanges para compra e venda forem as mesmas, não há arbitragem simples
             if best_buy_ex == best_sell_ex:
                 logger.debug(f"Melhores preços de compra e venda são na mesma exchange para {pair}. Pulando.")
                 continue
 
-            # Calcular lucro bruto
-            # Evitar divisão por zero
             if best_buy_price == 0:
                 logger.warning(f"Preço de compra zero para {pair}. Pulando arbitragem.")
                 continue
 
             gross_profit_percentage = ((best_sell_price - best_buy_price) / best_buy_price) * 100
 
-            # Sanity check para o lucro bruto
             if gross_profit_percentage > MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK:
                 logger.warning(f"Lucro bruto irrealista para {pair} ({gross_profit_percentage:.2f}%). "
                                f"Dados suspeitos: Comprar em {best_buy_ex}: {best_buy_price}, Vender em {best_sell_ex}: {best_sell_price}. Pulando.")
                 continue
 
-            # Calcular lucro líquido após taxas (compra + venda)
             net_profit_percentage = gross_profit_percentage - (2 * fee_percentage)
 
-            # Verificar liquidez mínima
-            # O volume necessário para o trade_amount_usd
-            # Evitar divisão por zero caso o preço seja muito baixo
             required_buy_volume = trade_amount_usd / best_buy_price if best_buy_price > 0 else float('inf')
             required_sell_volume = trade_amount_usd / best_sell_price if best_sell_price > 0 else float('inf')
 
@@ -227,28 +225,83 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
                 best_sell_volume >= required_sell_volume
             )
 
+            # Se a oportunidade atende aos critérios mínimos, adiciona à lista da varredura atual
             if net_profit_percentage >= lucro_minimo_porcentagem and has_sufficient_liquidity:
-                # Mensagem de alerta simplificada com timestamp
-                current_time = datetime.now().strftime("%H:%M:%S")
-                msg = (f"💰 Arbitragem para {pair} ({current_time})!\n"
-                       f"Compre em {best_buy_ex}: {best_buy_price:.8f}\n"
-                       f"Venda em {best_sell_ex}: {best_sell_price:.8f}\n"
-                       f"Lucro Líquido: {net_profit_percentage:.2f}%\n"
-                       f"Volume: ${trade_amount_usd:.2f}"
-                )
-                logger.info(msg)
-                await bot.send_message(chat_id=chat_id, text=msg)
+                opportunity_key = (pair, best_buy_ex, best_sell_ex)
+                current_scan_opportunities[opportunity_key] = {
+                    'buy_price': best_buy_price,
+                    'sell_price': best_sell_price,
+                    'net_profit': net_profit_percentage,
+                    'volume': trade_amount_usd
+                }
             else:
                 logger.debug(f"Arbitragem para {pair} não atende aos critérios: "
                              f"Lucro Líquido: {net_profit_percentage:.2f}% (Mínimo: {lucro_minimo_porcentagem}%), "
                              f"Liquidez Suficiente: {has_sufficient_liquidity}")
+
+        # --- Lógica de Comparação e Alerta Inteligente ---
+        opportunities_to_remove = []
+        # Verifica oportunidades ativas que não foram encontradas nesta varredura (oportunidades canceladas)
+        for key, last_opp_data in context.bot_data['active_opportunities'].items():
+            if key not in current_scan_opportunities:
+                # Oportunidade não encontrada na varredura atual, enviar alerta de cancelamento
+                pair, buy_ex, sell_ex = key
+                msg = (f"❌ Oportunidade para {pair} (CANCELADA)!\n"
+                       f"Anteriormente: Compre em {buy_ex}: {last_opp_data['buy_price']:.8f}, Venda em {sell_ex}: {last_opp_data['sell_price']:.8f}\n"
+                       f"Lucro Líquido Anterior: {last_opp_data['net_profit']:.2f}%\n"
+                       f"Volume: ${last_opp_data['volume']:.2f}"
+                )
+                logger.info(msg)
+                await bot.send_message(chat_id=chat_id, text=msg)
+                opportunities_to_remove.append(key)
+        
+        # Remove as oportunidades canceladas do dicionário de ativos
+        for key in opportunities_to_remove:
+            del context.bot_data['active_opportunities'][key]
+
+        # Verifica novas oportunidades ou oportunidades com mudanças significativas
+        for key, current_opp_data in current_scan_opportunities.items():
+            pair, buy_ex, sell_ex = key
+            last_opp_data = context.bot_data['active_opportunities'].get(key)
+            current_time_dt = datetime.now()
+
+            should_alert = False
+            if last_opp_data is None: # Nova oportunidade
+                should_alert = True
+            else:
+                # Oportunidade existente: verifica mudança no lucro ou cooldown
+                profit_diff = abs(current_opp_data['net_profit'] - last_opp_data['net_profit'])
+                time_since_last_alert = (current_time_dt - last_opp_data['last_alert_time']).total_seconds()
+
+                if profit_diff >= PROFIT_CHANGE_ALERT_THRESHOLD_PERCENT:
+                    should_alert = True # Lucro mudou significativamente
+                elif time_since_last_alert >= COOLDOWN_PERIOD_FOR_ALERTS:
+                    should_alert = True # Cooldown expirou, mesmo que o lucro não tenha mudado muito
+
+            if should_alert:
+                msg = (f"💰 Arbitragem para {pair} ({current_time_dt.strftime('%H:%M:%S')})!\n"
+                       f"Compre em {buy_ex}: {current_opp_data['buy_price']:.8f}\n"
+                       f"Venda em {sell_ex}: {current_opp_data['sell_price']:.8f}\n"
+                       f"Lucro Líquido: {current_opp_data['net_profit']:.2f}%\n"
+                       f"Volume: ${current_opp_data['volume']:.2f}"
+                )
+                logger.info(msg)
+                await bot.send_message(chat_id=chat_id, text=msg)
+                # Atualiza os dados da oportunidade ativa
+                context.bot_data['active_opportunities'][key] = {
+                    'buy_price': current_opp_data['buy_price'],
+                    'sell_price': current_opp_data['sell_price'],
+                    'net_profit': current_opp_data['net_profit'],
+                    'volume': current_opp_data['volume'],
+                    'last_alert_time': current_time_dt
+                }
 
     except Exception as e:
         logger.error(f"Erro geral na checagem de arbitragem: {e}", exc_info=True)
         if chat_id:
             await bot.send_message(chat_id=chat_id, text=f"Erro crítico na checagem de arbitragem: {e}")
     finally:
-        # Correção: Adiciona tratamento de erro para RuntimeError ao fechar exchanges
+        # Fechar todas as conexões das exchanges
         for exchange in exchanges_instances.values():
             try:
                 await exchange.close()
