@@ -1,110 +1,97 @@
 import asyncio
 import aiohttp
 import telegram
+from telegram.ext import ApplicationBuilder, CommandHandler
 
-TOKEN = '7218062934:AAFokGnqbOozHMLEB63IsTjxA8uZhfBoZj8'
+# --- CONFIGURAÇÃO DO BOT ---
+TOKEN = '7218062934:AAEcgNpqN3itPQ-GzotVtR_eQc7g9FynbzQ'
 CHAT_ID = '1093248456'
-MARGEM_LUCRO = 1.0  # margem mínima de lucro %
+lucro_minimo = 1.0  # % mínima para alertar
 
-bot = telegram.Bot(token=TOKEN)
-
-EXCHANGES = {
-    "binance": "https://api.binance.com/api/v3/ticker/price",
-    "kucoin": "https://api.kucoin.com/api/v1/market/allTickers",
-    "bitfinex": "https://api-pub.bitfinex.com/v2/tickers?symbols=ALL",
-    "huobi": "https://api.huobi.pro/market/tickers",
-    "bitmart": "https://api-cloud.bitmart.com/spot/v1/ticker",
-    "mexc": "https://api.mexc.com/api/v3/ticker/price",
-    "okx": "https://www.okx.com/api/v5/market/tickers?instType=SPOT"
-}
-
-pares_interesse = [
-    "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT",
-    "DOGEUSDT", "DOTUSDT", "AVAXUSDT", "MATICUSDT", "LTCUSDT"
+# --- LISTA DE EXCHANGES CONFIÁVEIS ---
+EXCHANGES = [
+    'binance', 'kucoin', 'coinbasepro', 'kraken', 'bitfinex',
+    'bittrex', 'bitstamp', 'okx', 'bybit', 'gate',
+    'poloniex', 'mexc', 'bitget', 'ascendex', 'cryptocom',
+    'lbank', 'huobi', 'p2pb2b', 'bibox', 'bigone'
 ]
 
-async def buscar_precos():
-    precos = {}
-    async with aiohttp.ClientSession() as session:
-        for nome, url in EXCHANGES.items():
-            try:
-                async with session.get(url, timeout=10) as resp:
-                    data = await resp.json()
-                    precos[nome] = data
-            except Exception as e:
-                print(f"[Erro] {nome}: {e}")
-    return precos
+# --- PAR DE MOEDAS USDT ---
+PAIRS = [
+    'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'XRP/USDT', 'ADA/USDT',
+    'SOL/USDT', 'DOGE/USDT', 'DOT/USDT', 'AVAX/USDT', 'TRX/USDT',
+    'MATIC/USDT', 'LTC/USDT', 'LINK/USDT', 'ATOM/USDT', 'NEAR/USDT',
+    'XLM/USDT', 'FIL/USDT', 'ETC/USDT', 'EGLD/USDT', 'APE/USDT'
+]
 
-def calcular_lucro(maior, menor):
+# --- FUNÇÃO PARA CONSULTAR PREÇOS ---
+async def get_price(session, exchange, pair):
     try:
-        return round(((maior - menor) / menor) * 100, 2)
-    except:
-        return 0
-
-def extrair_preco(exchange, data, symbol):
-    try:
-        symbol = symbol.upper()
-        if exchange == "binance":
-            for item in data:
-                if item['symbol'] == symbol:
-                    return float(item['price'])
-        elif exchange == "kucoin":
-            for item in data['data']['ticker']:
-                if item['symbolName'].replace("-", "") == symbol:
-                    return float(item['last'])
-        elif exchange == "bitfinex":
-            for item in data:
-                if item[0].upper() == f"T{symbol}":
-                    return float(item[7])
-        elif exchange == "huobi":
-            for item in data['data']:
-                if item['symbol'].upper() == symbol:
-                    return float(item['close'])
-        elif exchange == "bitmart":
-            for item in data['data']['tickers']:
-                if item['symbol'].upper() == symbol:
-                    return float(item['last_price'])
-        elif exchange == "mexc":
-            for item in data:
-                if item['symbol'].upper() == symbol:
-                    return float(item['price'])
-        elif exchange == "okx":
-            for item in data['data']:
-                if item['instId'].replace("-", "").upper() == symbol:
-                    return float(item['last'])
+        url = f'https://api.coingecko.com/api/v3/simple/price?ids={pair.split("/")[0].lower()}&vs_currencies=usdt'
+        async with session.get(url) as resp:
+            data = await resp.json()
+            return data[pair.split("/")[0].lower()]['usdt']
     except:
         return None
-    return None
 
-async def processar_arbitragem():
-    global MARGEM_LUCRO
+# --- FUNÇÃO PARA CALCULAR ARBITRAGEM ---
+async def verificar_arbitragem():
+    async with aiohttp.ClientSession() as session:
+        for pair in PAIRS:
+            prices = {}
+            for exchange in EXCHANGES:
+                price = await get_price(session, exchange, pair)
+                if price: prices[exchange] = price
 
+            if len(prices) < 2: continue
+
+            menor = min(prices.values())
+            maior = max(prices.values())
+            lucro = ((maior - menor) / menor) * 100
+
+            if lucro >= lucro_minimo:
+                menor_ex = min(prices, key=prices.get)
+                maior_ex = max(prices, key=prices.get)
+                msg = (
+                    f"📈 Oportunidade de arbitragem detectada!\n\n"
+                    f"Par: {pair}\n"
+                    f"Comprar em: {menor_ex} (💰 {menor:.2f})\n"
+                    f"Vender em: {maior_ex} (💰 {maior:.2f})\n"
+                    f"Lucro estimado: {lucro:.2f}%"
+                )
+                await send_telegram_message(msg)
+
+# --- ENVIAR MENSAGEM PARA O TELEGRAM ---
+async def send_telegram_message(msg):
+    bot = telegram.Bot(token=TOKEN)
+    await bot.send_message(chat_id=CHAT_ID, text=msg)
+
+# --- COMANDO /set PARA AJUSTAR % PELO TELEGRAM ---
+async def set_command(update, context):
+    global lucro_minimo
+    try:
+        novo_valor = float(context.args[0])
+        lucro_minimo = novo_valor
+        await update.message.reply_text(f"Novo valor de lucro mínimo definido para {lucro_minimo:.2f}%")
+    except:
+        await update.message.reply_text("Uso correto: /set 2.5")
+
+# --- MAIN LOOP COM VERIFICAÇÃO CONTÍNUA ---
+async def main_loop():
     while True:
-        precos = await buscar_precos()
-        for par in pares_interesse:
-            melhores = {}
-            for nome, dados in precos.items():
-                preco = extrair_preco(nome, dados, par)
-                if preco:
-                    melhores[nome] = preco
-            if len(melhores) >= 2:
-                maior = max(melhores.items(), key=lambda x: x[1])
-                menor = min(melhores.items(), key=lambda x: x[1])
-                lucro = calcular_lucro(maior[1], menor[1])
-                if lucro >= MARGEM_LUCRO:
-                    mensagem = (
-                        f"💰 Oportunidade de arbitragem!\n\n"
-                        f"🪙 Par: {par}\n"
-                        f"🔻 Comprar: {menor[0]} a {menor[1]:.6f}\n"
-                        f"🔺 Vender: {maior[0]} a {maior[1]:.6f}\n"
-                        f"📈 Lucro estimado: {lucro:.2f}%"
-                    )
-                    await bot.send_message(chat_id=CHAT_ID, text=mensagem)
-
+        try:
+            await verificar_arbitragem()
+        except Exception as e:
+            await send_telegram_message(f"Erro no bot: {str(e)}")
         await asyncio.sleep(60)
 
-async def main():
-    await processar_arbitragem()
+# --- INICIALIZAÇÃO DO BOT ---
+def start_bot():
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("set", set_command))
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    loop.create_task(main_loop())
+    start_bot()
