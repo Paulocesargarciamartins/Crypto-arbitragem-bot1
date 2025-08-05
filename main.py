@@ -22,13 +22,12 @@ DEFAULT_FEE_PERCENTAGE = 0.1 # Taxa de negociação média por lado (0.1% é com
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 500.0 # 500% é um valor muito alto, mas seguro para filtrar erros grotescos.
 
 # Exchanges confiáveis para monitorar (20)
-# REMOVIDAS 'lbank' e 'gateio' temporariamente devido a dados inconsistentes nos logs.
-# Você pode adicioná-las de volta se os problemas de dados forem resolvidos.
+# REMOVIDAS 'lbank' e 'gateio' permanentemente devido a dados inconsistentes.
 EXCHANGES_LIST = [
     'binance', 'coinbasepro', 'kraken', 'bitfinex', 'bittrex',
     'huobipro', 'okex', 'bitstamp', 'kucoin',
     'poloniex', 'bybit', 'coinex', 'bitget', 'ascendex',
-    'bibox', 'bitflyer', 'digifinex', 'mexc', 'lbank'
+    'bibox', 'bitflyer', 'digifinex', 'mexc' # 'lbank' e 'gateio' removidas
 ]
 
 
