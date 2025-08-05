@@ -5,3 +5,4 @@ apscheduler
 flask
 gunicorn
 python-dotenv
+ccxt
