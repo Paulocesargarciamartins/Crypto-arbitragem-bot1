@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from telegram import Update, BotCommand
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, JobQueue
 import ccxt.async_support as ccxt
 import os
 import nest_asyncio
@@ -11,8 +11,8 @@ import nest_asyncio
 nest_asyncio.apply()
 
 # Configurações básicas
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")  # Configure no Heroku config vars
-LUCRO_MINIMO_PORCENTAGEM = 2.0  # Exemplo, pode ajustar e mandar via comando Telegram
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+LUCRO_MINIMO_PORCENTAGEM = 2.0
 
 # Exchanges confiáveis para monitorar (20)
 EXCHANGES_LIST = [
@@ -25,7 +25,6 @@ EXCHANGES_LIST = [
 # Pares USDT (exemplo curto, você pode ampliar)
 PAIRS = [
     "BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "DOGE/USDT", "ADA/USDT", "LTC/USDT",
-    # ... até 100 pares (adicione conforme seu histórico)
 ]
 
 logging.basicConfig(
@@ -38,7 +37,7 @@ logger = logging.getLogger(__name__)
 async def check_arbitrage(bot):
     try:
         exchanges = {}
-        for ex_id in EXCHANGes_LIST:
+        for ex_id in EXCHANGES_LIST:
             exchange = getattr(ccxt, ex_id)({
                 'enableRateLimit': True,
             })
@@ -69,7 +68,6 @@ async def check_arbitrage(bot):
                 logger.info(msg)
                 await bot.send_message(chat_id=os.getenv("TELEGRAM_CHAT_ID"), text=msg)
 
-        # Fechar exchanges para liberar recursos
         for exchange in exchanges.values():
             await exchange.close()
 
@@ -94,20 +92,19 @@ async def setlucro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except (IndexError, ValueError):
         await update.message.reply_text("Uso incorreto. Exemplo: /setlucro 2.5")
 
-# FUNÇÃO PRINCIPAL DO BOT (ASSÍNCRONA)
+# FUNÇÃO PRINCIPAL DO BOT
 async def main():
-    application = ApplicationBuilder().token(TOKEN).build()
+    # A ÚNICA MUDANÇA É AQUI: ADICIONAR job_queue(JobQueue())
+    application = ApplicationBuilder().token(TOKEN).job_queue(JobQueue()).build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("setlucro", setlucro))
 
-    # Agendar tarefa de arbitragem a cada 60 segundos
     async def periodic_arbitrage_task(context: ContextTypes.DEFAULT_TYPE):
         await check_arbitrage(application.bot)
 
     application.job_queue.run_repeating(periodic_arbitrage_task, interval=60, first=5)
 
-    # Comandos oficiais (exibir no Telegram).
     await application.bot.set_my_commands([
         BotCommand("start", "Iniciar o bot"),
         BotCommand("setlucro", "Definir lucro mínimo em %")
