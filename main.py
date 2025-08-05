@@ -5,7 +5,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, JobQu
 import ccxt.async_support as ccxt
 import os
 import nest_asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Aplica o patch para permitir loops aninhados,
 # corrigindo o problema no ambiente Heroku
@@ -22,14 +22,22 @@ DEFAULT_FEE_PERCENTAGE = 0.1 # Taxa de negociação média por lado (0.1% é com
 # Mantido em 100.0% conforme solicitado.
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0 
 
-# Exchanges confiáveis para monitorar (Bittrex, Bibox, Huobi removidas devido a erros nos logs)
+# Período de cooldown para evitar alertas repetidos para a mesma oportunidade (em segundos).
+COOLDOWN_PERIOD_FOR_ALERTS = 300 # 5 minutos
+# Porcentagem de mudança no lucro líquido para re-alertar uma oportunidade existente antes do cooldown expirar
+PROFIT_CHANGE_ALERT_THRESHOLD_PERCENT = 0.5 # Ex: se o lucro mudar em 0.5% ou mais, alerta novamente
+
+# Número de varreduras consecutivas que uma oportunidade deve estar ausente
+# antes de um alerta de cancelamento ser enviado.
+CANCELLATION_CONFIRM_SCANS = 2 # Ex: 2 varreduras (2 minutos com intervalo de 60s)
+
+# Exchanges confiáveis para monitorar (reduzido para as 10 maiores/mais confiáveis)
 EXCHANGES_LIST = [
-    'binance', 'coinbase', 'kraken', 'bitfinex',
-    'okx', 'bitstamp', 'kucoin', 'bybit', 'bitget',
-    'ascendex', 'mexc', 'poloniex' 
+    'binance', 'coinbase', 'kraken', 'okx', 'bybit',
+    'kucoin', 'bitstamp', 'bitfinex', 'bitget', 'mexc'
 ]
 
-# Pares USDT (limitado aos primeiros 100 pares para otimização)
+# Pares USDT (reduzido para os primeiros 60 pares para otimização)
 PAIRS = [
     "BTC/USDT", "ETH/USDT", "XRP/USDT", "USDT/USDT", "BNB/USDT", "SOL/USDT", 
     "USDC/USDT", "STETH/USDT", "DOGE/USDT", "TRX/USDT", "ADA/USDT", "XLM/USDT", 
@@ -40,22 +48,7 @@ PAIRS = [
     "USDS/USDT", "ENA/USDT", "TAO/USDT", "MNT/USDT", "JITOSOL/USDT", "KAS/USDT", 
     "PENGU/USDT", "ARB/USDT", "BONK/USDT", "RENDER/USDT", "POL/USDT", "WLD/USDT", 
     "STORY/USDT", "TRUMP/USDT", "SEI/USDT", "SKY/USDT", "HYPE/USDT", "WBETH/USDT", 
-    "MKR/USDT", "FIL/USDT", "OP/USDT", "IOTA/USDT", "DASH/USDT", "NEXO/USDT", 
-    "SUSHI/USDT", "BGB/USDT", "WIF/USDT", "FLOW/USDT", "IMX/USDT", "RUNE/USDT", 
-    "LDO/USDT", "FET/USDT", "GRT/USDT", "FTM/USDT", "QNT/USDT", "STRK/USDT", 
-    "VET/USDT", "INJ/USDT", "DYDX/USDT", "EGLD/USDT", "JUP/USDT", "GALA/USDT", 
-    "AXS/USDT", "THETA/USDT", "MINA/USDT", "ENJ/USDT", "CHZ/USDT", "YFI/USDT", 
-    "GMX/USDT", "ZEC/USDT", "ZIL/USDT", "GMT/USDT", "WAVES/USDT", "KLAY/USDT", 
-    "KAVA/USDT", "CELO/USDT", "XEC/USDT", "HNT/USDT", "RSR/USDT", "RVN/USDT", 
-    "BAT/USDT", "DCR/USDT", "DGB/USDT", "XEM/USDT", "SC/USDT", "ZEN/USDT", 
-    "COMP/USDT", "SNX/USDT", "UMA/USDT", "CRV/USDT", "KNC/USDT", "BAL/USDT", 
-    "ZRX/USDT", "OGN/USDT", "RLC/USDT", "BAND/USDT", "TOMO/USDT", "AR/USDT", 
-    "PERP/USDT", "LINA/USDT", "ANKR/USDT", "OCEAN/USDT", "SFP/USDT", "ONE/USDT", 
-    "PHA/USDT", "CKB/USDT", "CTK/USDT", "YFII/USDT", "BOND/USDT", "UTK/USDT", 
-    "CVC/USDT", "IRIS/USDT", "NULS/USDT", "NKN/USDT", "STX/USDT", "DODO/USDT", 
-    "NMR/USDT", "MCO/USDT", "LPT/USDT", "SKL/USDT", "REQ/USDT", "CQT/USDT", 
-    "WTC/USDT", "TCT/USDT", "COTI/USDT", "MDT/USDT", "TFUEL/USDT", "TUSD/USDT", 
-    "SRM/USDT", "GLM/USDT"
+    "MKR/USDT", "FIL/USDT", "OP/USDT", "IOTA/USDT" # Primeiros 60 pares
 ]
 
 # Configuração de logging
@@ -65,6 +58,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Dicionário global para armazenar instâncias de exchanges (carregadas uma vez)
+global_exchanges_instances = {}
+
 # --- Funções Auxiliares para Busca Concorrente ---
 async def fetch_market_data_for_exchange(exchange, pair, ex_id):
     """
@@ -72,6 +68,7 @@ async def fetch_market_data_for_exchange(exchange, pair, ex_id):
     Retorna uma tupla (ex_id, market_data) ou None em caso de erro/dados inválidos.
     """
     try:
+        # Verifica se o par está disponível na exchange antes de tentar buscar o order book
         if pair in exchange.markets and exchange.has['fetchOrderBook']:
             order_book = await exchange.fetch_order_book(pair, limit=100) 
             
@@ -118,125 +115,173 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
     trade_amount_usd = context.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD)
     fee_percentage = context.bot_data.get('fee_percentage', DEFAULT_FEE_PERCENTAGE)
 
+    # Inicializa o dicionário para rastrear as oportunidades ativas e os últimos alertas
+    if 'active_opportunities' not in context.bot_data:
+        context.bot_data['active_opportunities'] = {} # { (pair, buy_ex, sell_ex): { 'buy_price': float, 'sell_price': float, 'net_profit': float, 'volume': float, 'last_alert_time': datetime, 'missed_scans': int } }
+
+    current_scan_opportunities = {} # Oportunidades válidas encontradas nesta varredura
+
     logger.info(f"Iniciando checagem de arbitragem. Lucro mínimo: {lucro_minimo_porcentagem}%, Volume de trade: {trade_amount_usd} USD")
 
-    exchanges_instances = {}
-    try:
-        # Inicializa as exchanges
-        for ex_id in EXCHANGES_LIST:
-            try:
-                exchange_class = getattr(ccxt, ex_id)
-                exchange = exchange_class({
-                    'enableRateLimit': True, # Garante que o ccxt respeite os limites de taxa da API
-                    'timeout': 3000, # Reduzido timeout para 3 segundos para requisições mais rápidas
-                })
-                await exchange.load_markets()
-                exchanges_instances[ex_id] = exchange
-            except Exception as e:
-                logger.warning(f"Não foi possível carregar a exchange {ex_id}: {e}")
-                if ex_id in exchanges_instances:
-                    await exchanges_instances[ex_id].close()
-                    del exchanges_instances[ex_id]
+    # Usa as instâncias de exchanges carregadas globalmente
+    exchanges_to_scan = {ex_id: instance for ex_id, instance in global_exchanges_instances.items()}
         
-        if len(exchanges_instances) < 2:
-            logger.error("Não há exchanges suficientes carregadas para verificar arbitragem.")
-            await bot.send_message(chat_id=chat_id, text="Erro: Não foi possível conectar a exchanges suficientes para checar arbitragem.")
-            return
+    if len(exchanges_to_scan) < 2:
+        logger.error("Não há exchanges suficientes carregadas globalmente para verificar arbitragem.")
+        await bot.send_message(chat_id=chat_id, text="Erro: Não foi possível conectar a exchanges suficientes para checar arbitragem.")
+        return
 
-        # Itera sobre cada par para encontrar oportunidades
-        for pair in PAIRS:
-            market_data_tasks = []
-            for ex_id, exchange in exchanges_instances.items():
-                market_data_tasks.append(
-                    fetch_market_data_for_exchange(exchange, pair, ex_id)
-                )
-            
-            results = await asyncio.gather(*market_data_tasks, return_exceptions=True)
-
-            market_data = {}
-            for result in results:
-                if isinstance(result, Exception):
-                    logger.warning(f"Erro durante a busca concorrente de dados: {result}")
-                elif result:
-                    ex_id, data = result
-                    market_data[ex_id] = data
-            
-            if len(market_data) < 2:
-                continue
-
-            best_buy_ex = None
-            best_buy_price = float('inf')
-            best_buy_volume = 0
-
-            best_sell_ex = None
-            best_sell_price = 0.0
-            best_sell_volume = 0
-
-            for ex_id, data in market_data.items():
-                if data['ask'] < best_buy_price:
-                    best_buy_price = data['ask']
-                    best_buy_ex = ex_id
-                    best_buy_volume = data['ask_volume']
-
-                if data['bid'] > best_sell_price:
-                    best_sell_price = data['bid']
-                    best_sell_ex = ex_id
-                    best_sell_volume = data['bid_volume']
-
-            if best_buy_ex == best_sell_ex:
-                logger.debug(f"Melhores preços de compra e venda são na mesma exchange para {pair}. Pulando.")
-                continue
-
-            if best_buy_price == 0:
-                logger.warning(f"Preço de compra zero para {pair}. Pulando arbitragem.")
-                continue
-
-            gross_profit_percentage = ((best_sell_price - best_buy_price) / best_buy_price) * 100
-
-            if gross_profit_percentage > MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK:
-                logger.warning(f"Lucro bruto irrealista para {pair} ({gross_profit_percentage:.2f}%). "
-                               f"Dados suspeitos: Comprar em {best_buy_ex}: {best_buy_price}, Vender em {best_sell_ex}: {best_sell_price}. Pulando.")
-                continue
-
-            net_profit_percentage = gross_profit_percentage - (2 * fee_percentage)
-
-            required_buy_volume = trade_amount_usd / best_buy_price if best_buy_price > 0 else float('inf')
-            required_sell_volume = trade_amount_usd / best_sell_price if best_sell_price > 0 else float('inf')
-
-            has_sufficient_liquidity = (
-                best_buy_volume >= required_buy_volume and
-                best_sell_volume >= required_sell_volume
+    # Itera sobre cada par para encontrar oportunidades
+    for pair in PAIRS:
+        market_data_tasks = []
+        for ex_id, exchange in exchanges_to_scan.items():
+            market_data_tasks.append(
+                fetch_market_data_for_exchange(exchange, pair, ex_id)
             )
+        
+        results = await asyncio.gather(*market_data_tasks, return_exceptions=True)
 
-            if net_profit_percentage >= lucro_minimo_porcentagem and has_sufficient_liquidity:
-                # Mensagem de alerta simplificada com timestamp
-                current_time = datetime.now().strftime("%H:%M:%S")
-                msg = (f"💰 Arbitragem para {pair} ({current_time})!\n"
-                       f"Compre em {best_buy_ex}: {best_buy_price:.8f}\n"
-                       f"Venda em {best_sell_ex}: {best_sell_price:.8f}\n"
-                       f"Lucro Líquido: {net_profit_percentage:.2f}%\n"
-                       f"Volume: ${trade_amount_usd:.2f}"
+        market_data = {}
+        for result in results:
+            if isinstance(result, Exception):
+                logger.warning(f"Erro durante a busca concorrente de dados: {result}")
+            elif result:
+                ex_id, data = result
+                market_data[ex_id] = data
+        
+        if len(market_data) < 2:
+            continue
+
+        best_buy_ex = None
+        best_buy_price = float('inf')
+        best_buy_volume = 0
+
+        best_sell_ex = None
+        best_sell_price = 0.0
+        best_sell_volume = 0
+
+        for ex_id, data in market_data.items():
+            if data['ask'] < best_buy_price:
+                best_buy_price = data['ask']
+                best_buy_ex = ex_id
+                best_buy_volume = data['ask_volume']
+
+            if data['bid'] > best_sell_price:
+                best_sell_price = data['bid']
+                best_sell_ex = ex_id
+                best_sell_volume = data['bid_volume']
+
+        if best_buy_ex == best_sell_ex:
+            logger.debug(f"Melhores preços de compra e venda são na mesma exchange para {pair}. Pulando.")
+            continue
+
+        if best_buy_price == 0:
+            logger.warning(f"Preço de compra zero para {pair}. Pulando arbitragem.")
+            continue
+
+        gross_profit_percentage = ((best_sell_price - best_buy_price) / best_buy_price) * 100
+
+        if gross_profit_percentage > MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK:
+            logger.warning(f"Lucro bruto irrealista para {pair} ({gross_profit_percentage:.2f}%). "
+                           f"Dados suspeitos: Comprar em {best_buy_ex}: {best_buy_price}, Vender em {best_sell_ex}: {best_sell_price}. Pulando.")
+            continue
+
+        net_profit_percentage = gross_profit_percentage - (2 * fee_percentage)
+
+        required_buy_volume = trade_amount_usd / best_buy_price if best_buy_price > 0 else float('inf')
+        required_sell_volume = trade_amount_usd / best_sell_price if best_sell_price > 0 else float('inf')
+
+        has_sufficient_liquidity = (
+            best_buy_volume >= required_buy_volume and
+            best_sell_volume >= required_sell_volume
+        )
+
+        # Se a oportunidade atende aos critérios mínimos, adiciona à lista da varredura atual
+        if net_profit_percentage >= lucro_minimo_porcentagem and has_sufficient_liquidity:
+            opportunity_key = (pair, best_buy_ex, best_sell_ex)
+            current_scan_opportunities[opportunity_key] = {
+                'buy_price': best_buy_price,
+                'sell_price': best_sell_price,
+                'net_profit': net_profit_percentage,
+                'volume': trade_amount_usd
+            }
+        else:
+            logger.debug(f"Arbitragem para {pair} não atende aos critérios: "
+                         f"Lucro Líquido: {net_profit_percentage:.2f}% (Mínimo: {lucro_minimo_porcentagem}%), "
+                         f"Liquidez Suficiente: {has_sufficient_liquidity}")
+
+    # --- Lógica de Comparação e Alerta Inteligente ---
+    opportunities_to_remove_from_active = []
+    # Primeiro, atualiza os contadores de 'missed_scans' e identifica cancelamentos
+    for key, opp_data in context.bot_data['active_opportunities'].items():
+        if key not in current_scan_opportunities:
+            # Oportunidade não encontrada nesta varredura, incrementa o contador
+            opp_data['missed_scans'] = opp_data.get('missed_scans', 0) + 1
+            if opp_data['missed_scans'] >= CANCELLATION_CONFIRM_SCANS:
+                # Oportunidade realmente cancelada após N varreduras
+                pair, buy_ex, sell_ex = key
+                msg = (f"❌ Oportunidade para {pair} (CANCELADA)!\n"
+                       f"Anteriormente: Compre em {buy_ex}: {opp_data['buy_price']:.8f}, Venda em {sell_ex}: {opp_data['sell_price']:.8f}\n"
+                       f"Lucro Líquido Anterior: {opp_data['net_profit']:.2f}%\n"
+                       f"Volume: ${opp_data['volume']:.2f}"
                 )
                 logger.info(msg)
                 await bot.send_message(chat_id=chat_id, text=msg)
-            else:
-                logger.debug(f"Arbitragem para {pair} não atende aos critérios: "
-                             f"Lucro Líquido: {net_profit_percentage:.2f}% (Mínimo: {lucro_minimo_porcentagem}%), "
-                             f"Liquidez Suficiente: {has_sufficient_liquidity}")
+                opportunities_to_remove_from_active.append(key)
+        else:
+            # Oportunidade encontrada novamente, reseta o contador
+            opp_data['missed_scans'] = 0
+    
+    # Remove as oportunidades canceladas do dicionário de ativos
+    for key in opportunities_to_remove_from_active:
+        del context.bot_data['active_opportunities'][key]
+
+    # Verifica novas oportunidades ou oportunidades com mudanças significativas
+    for key, current_opp_data in current_scan_opportunities.items():
+        pair, buy_ex, sell_ex = key
+        last_opp_data = context.bot_data['active_opportunities'].get(key)
+        current_time_dt = datetime.now()
+
+        should_alert = False
+        if last_opp_data is None: # Nova oportunidade
+            should_alert = True
+        else:
+            # Oportunidade existente: verifica mudança no lucro ou cooldown
+            profit_diff = abs(current_opp_data['net_profit'] - last_opp_data['net_profit'])
+            time_since_last_alert = (current_time_dt - last_opp_data['last_alert_time']).total_seconds()
+
+            if profit_diff >= PROFIT_CHANGE_ALERT_THRESHOLD_PERCENT:
+                should_alert = True # Lucro mudou significativamente
+            elif time_since_last_alert >= COOLDOWN_PERIOD_FOR_ALERTS:
+                should_alert = True # Cooldown expirou, mesmo que o lucro não tenha mudado muito
+
+        if should_alert:
+            msg = (f"💰 Arbitragem para {pair} ({current_time_dt.strftime('%H:%M:%S')})!\n"
+                   f"Compre em {buy_ex}: {current_opp_data['buy_price']:.8f}\n"
+                   f"Venda em {sell_ex}: {current_opp_data['sell_price']:.8f}\n"
+                   f"Lucro Líquido: {current_opp_data['net_profit']:.2f}%\n"
+                   f"Volume: ${current_opp_data['volume']:.2f}"
+            )
+            logger.info(msg)
+            await bot.send_message(chat_id=chat_id, text=msg)
+            # Atualiza os dados da oportunidade ativa
+            context.bot_data['active_opportunities'][key] = {
+                'buy_price': current_opp_data['buy_price'],
+                'sell_price': current_opp_data['sell_price'],
+                'net_profit': current_opp_data['net_profit'],
+                'volume': current_opp_data['volume'],
+                'last_alert_time': current_time_dt,
+                'missed_scans': 0 # Reseta o contador de scans perdidos
+            }
 
     except Exception as e:
         logger.error(f"Erro geral na checagem de arbitragem: {e}", exc_info=True)
         if chat_id:
             await bot.send_message(chat_id=chat_id, text=f"Erro crítico na checagem de arbitragem: {e}")
     finally:
-        # Fechar todas as conexões das exchanges
-        for exchange in exchanges_instances.values():
-            try:
-                await exchange.close()
-            except RuntimeError as e:
-                logger.warning(f"Erro ao fechar conexão da exchange {exchange.id} (RuntimeError): {e}. Pode ocorrer durante o desligamento do loop.")
-            except Exception as e:
-                logger.error(f"Erro inesperado ao fechar conexão da exchange {exchange.id}: {e}")
+        # As conexões das exchanges são fechadas apenas no final do main()
+        # para que as instâncias globais permaneçam abertas durante as varreduras.
+        pass # Removido o close() aqui
 
 # Comando /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -300,6 +345,28 @@ async def setfee(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def main():
     application = ApplicationBuilder().token(TOKEN).build()
 
+    # Inicializa e carrega os mercados de todas as exchanges UMA VEZ
+    logger.info("Carregando mercados das exchanges (isso pode levar alguns segundos)...")
+    for ex_id in EXCHANGES_LIST:
+        try:
+            exchange_class = getattr(ccxt, ex_id)
+            exchange = exchange_class({
+                'enableRateLimit': True,
+                'timeout': 3000,
+            })
+            await exchange.load_markets()
+            global_exchanges_instances[ex_id] = exchange
+            logger.info(f"Exchange {ex_id} carregada com sucesso.")
+        except Exception as e:
+            logger.error(f"ERRO CRÍTICO: Não foi possível carregar a exchange {ex_id}. Ela será ignorada. Erro: {e}")
+            # Não remove do EXCHANGES_LIST, mas não adiciona à global_exchanges_instances
+            # para que as varreduras não tentem usá-la.
+
+    if len(global_exchanges_instances) < 2:
+        logger.error("ERRO CRÍTICO: Menos de 2 exchanges foram carregadas com sucesso. O bot não pode operar.")
+        # Aqui você pode adicionar uma forma de notificar o admin ou encerrar o bot se for o caso
+        # Por enquanto, o bot continuará tentando, mas as varreduras falharão.
+
     # Adiciona handlers para os comandos
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("setlucro", setlucro))
@@ -308,8 +375,8 @@ async def main():
 
     # Adiciona a tarefa periódica de arbitragem
     # O 'first=5' faz a primeira execução 5 segundos após o bot iniciar
-    # O 'interval=90' executa a cada 90 segundos (1.5 minutos)
-    application.job_queue.run_repeating(check_arbitrage, interval=90, first=5)
+    # O 'interval=60' executa a cada 60 segundos (1 minuto)
+    application.job_queue.run_repeating(check_arbitrage, interval=60, first=5)
 
     # Define os comandos que aparecerão no Telegram
     await application.bot.set_my_commands([
@@ -322,6 +389,15 @@ async def main():
     logger.info("Bot iniciado com sucesso e aguardando mensagens...")
     # Inicia o polling para receber atualizações do Telegram
     await application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+    # Fechar todas as conexões das exchanges quando o bot for encerrado
+    for exchange in global_exchanges_instances.values():
+        try:
+            await exchange.close()
+        except RuntimeError as e:
+            logger.warning(f"Erro ao fechar conexão da exchange {exchange.id} (RuntimeError): {e}. Pode ocorrer durante o desligamento do loop.")
+        except Exception as e:
+            logger.error(f"Erro inesperado ao fechar conexão da exchange {exchange.id}: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
