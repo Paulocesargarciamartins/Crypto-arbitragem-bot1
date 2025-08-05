@@ -17,6 +17,10 @@ DEFAULT_LUCRO_MINIMO_PORCENTAGEM = 2.0
 DEFAULT_TRADE_AMOUNT_USD = 50.0 # Quantidade de USD para verificar liquidez
 DEFAULT_FEE_PERCENTAGE = 0.1 # Taxa de negociação média por lado (0.1% é comum)
 
+# Novo: Limite máximo de lucro bruto para validação de dados.
+# Se o lucro bruto for maior que isso, consideramos que os dados estão incorretos.
+MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 500.0 # 500% é um valor muito alto, mas seguro para filtrar erros grotescos.
+
 # Exchanges confiáveis para monitorar (20)
 # Nota: Nem todas as exchanges suportam todos os pares ou têm as mesmas APIs.
 # Algumas podem exigir chaves de API para acesso a dados de mercado.
@@ -95,7 +99,8 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
                     # Verifica se o par existe na exchange e se suporta fetch_order_book
                     if pair in exchange.markets and exchange.has['fetchOrderBook']:
                         # Busca o livro de ofertas para verificar liquidez
-                        order_book = await exchange.fetch_order_book(pair, limit=5) # Limite pequeno para agilizar
+                        # Aumentado o limite para 20 para uma visão mais robusta
+                        order_book = await exchange.fetch_order_book(pair, limit=20) 
                         
                         if order_book and order_book['bids'] and order_book['asks']:
                             best_bid = order_book['bids'][0][0] # Melhor preço de compra (para quem vende)
@@ -103,12 +108,16 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
                             best_ask = order_book['asks'][0][0] # Melhor preço de venda (para quem compra)
                             best_ask_volume = order_book['asks'][0][1]
 
-                            market_data[ex_id] = {
-                                'bid': best_bid,
-                                'bid_volume': best_bid_volume,
-                                'ask': best_ask,
-                                'ask_volume': best_ask_volume,
-                            }
+                            # Sanity check: Preços devem ser positivos e ask >= bid
+                            if best_bid > 0 and best_ask > 0 and best_ask >= best_bid:
+                                market_data[ex_id] = {
+                                    'bid': best_bid,
+                                    'bid_volume': best_bid_volume,
+                                    'ask': best_ask,
+                                    'ask_volume': best_ask_volume,
+                                }
+                            else:
+                                logger.debug(f"Dados inválidos para {pair} em {ex_id} (preço não positivo ou ask < bid): Bid={best_bid}, Ask={best_ask}")
                         else:
                             logger.debug(f"Livro de ofertas vazio ou inválido para {pair} em {ex_id}")
                     else:
@@ -152,15 +161,27 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
                 continue
 
             # Calcular lucro bruto
+            # Evitar divisão por zero
+            if best_buy_price == 0:
+                logger.warning(f"Preço de compra zero para {pair}. Pulando arbitragem.")
+                continue
+
             gross_profit_percentage = ((best_sell_price - best_buy_price) / best_buy_price) * 100
+
+            # Novo: Sanity check para o lucro bruto
+            if gross_profit_percentage > MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK:
+                logger.warning(f"Lucro bruto irrealista para {pair} ({gross_profit_percentage:.2f}%). "
+                               f"Dados suspeitos: Comprar em {best_buy_ex}: {best_buy_price}, Vender em {best_sell_ex}: {best_sell_price}. Pulando.")
+                continue
 
             # Calcular lucro líquido após taxas (compra + venda)
             net_profit_percentage = gross_profit_percentage - (2 * fee_percentage)
 
             # Verificar liquidez mínima
             # O volume necessário para o trade_amount_usd
-            required_buy_volume = trade_amount_usd / best_buy_price
-            required_sell_volume = trade_amount_usd / best_sell_price
+            # Evitar divisão por zero caso o preço seja muito baixo
+            required_buy_volume = trade_amount_usd / best_buy_price if best_buy_price > 0 else float('inf')
+            required_sell_volume = trade_amount_usd / best_sell_price if best_sell_price > 0 else float('inf')
 
             has_sufficient_liquidity = (
                 best_buy_volume >= required_buy_volume and
@@ -168,12 +189,12 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
             )
 
             if net_profit_percentage >= lucro_minimo_porcentagem and has_sufficient_liquidity:
-                msg = (f"💰 Oportunidade de Arbitragem Encontrada para {pair}!\n"
-                       f"Comprar em {best_buy_ex}: {best_buy_price:.8f} (Volume: {best_buy_volume:.2f})\n"
-                       f"Vender em {best_sell_ex}: {best_sell_price:.8f} (Volume: {best_sell_volume:.2f})\n"
-                       f"Lucro Bruto: {gross_profit_percentage:.2f}%\n"
-                       f"Lucro Líquido (após taxas de {fee_percentage*2:.2f}%): {net_profit_percentage:.2f}%\n"
-                       f"Volume de Trade Considerado: ${trade_amount_usd:.2f}"
+                # Mensagem de alerta simplificada
+                msg = (f"💰 Arbitragem para {pair}!\n"
+                       f"Compre em {best_buy_ex}: {best_buy_price:.8f}\n"
+                       f"Venda em {best_sell_ex}: {best_sell_price:.8f}\n"
+                       f"Lucro Líquido: {net_profit_percentage:.2f}%\n"
+                       f"Volume: ${trade_amount_usd:.2f}"
                 )
                 logger.info(msg)
                 await bot.send_message(chat_id=chat_id, text=msg)
