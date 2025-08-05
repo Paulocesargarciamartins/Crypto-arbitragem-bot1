@@ -4,6 +4,11 @@ from telegram import Update, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import ccxt.async_support as ccxt
 import os
+import nest_asyncio
+
+# Aplica o patch para permitir loops aninhados,
+# corrigindo o problema no ambiente Heroku
+nest_asyncio.apply()
 
 # Configurações básicas
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")  # Configure no Heroku config vars
@@ -111,13 +116,5 @@ async def main():
     logger.info("Bot iniciado com sucesso.")
     await application.run_polling()
 
-# MUDANÇA NO BLOCO DE INICIALIZAÇÃO PARA GERENCIAMENTO MANUAL DO LOOP
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    try:
-        loop.run_until_complete(main())
-    except (KeyboardInterrupt, SystemExit):
-        pass
-    finally:
-        if not loop.is_running():
-            loop.close()
+    asyncio.run(main())
