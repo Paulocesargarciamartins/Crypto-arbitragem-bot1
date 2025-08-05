@@ -389,7 +389,7 @@ async def main():
     logger.info("Bot iniciado com sucesso e aguardando mensagens...")
     # Inicia o polling para receber atualizações do Telegram
     try:
-        await application.run_polling(allowed_updates=Update.ALL_TYPES)
+        await application.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False) # close_loop=False para evitar que o loop seja fechado prematuramente
     finally: # Este bloco 'finally' é executado sempre, mesmo se houver exceções
         # Fechar todas as conexões das exchanges quando o bot for encerrado
         logger.info("Fechando conexões das exchanges...")
