@@ -13,7 +13,6 @@ nest_asyncio.apply()
 
 # --- Configurações básicas ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-# LUCRO_MINIMO_PORCENTAGEM será gerenciado via comando /setlucro
 DEFAULT_LUCRO_MINIMO_PORCENTAGEM = 2.0
 DEFAULT_TRADE_AMOUNT_USD = 50.0 # Quantidade de USD para verificar liquidez
 DEFAULT_FEE_PERCENTAGE = 0.1 # Taxa de negociação média por lado (0.1% é comum)
@@ -30,15 +29,13 @@ PROFIT_CHANGE_ALERT_THRESHOLD_PERCENT = 0.5 # Ex: se o lucro mudar em 0.5% ou ma
 # antes de um alerta de cancelamento ser enviado.
 CANCELLATION_CONFIRM_SCANS = 2 # Ex: 2 varreduras (2 minutos com intervalo de 60s)
 
-# Exchanges confiáveis para monitorar
+# Exchanges confiáveis para monitorar (reduzida para as 10 mais estáveis e populares)
 EXCHANGES_LIST = [
     'binance', 'coinbase', 'kraken', 'okx', 'bybit',
-    'kucoin', 'bitstamp', 'bitfinex', 'bitget', 'mexc',
-    'huobi', 'gateio', 'bitmex', 'exmo', 'upbit',
-    'coinone', 'bithumb', 'phemex', 'lbank', 'ftx' # Voltou a ter 20 exchanges
+    'kucoin', 'bitstamp', 'bitfinex', 'bitget', 'mexc'
 ]
 
-# Pares USDT (Voltou a ter mais pares para um universo maior)
+# Pares USDT (reduzido para os 60 pares mais relevantes para otimização de memória)
 PAIRS = [
     "BTC/USDT", "ETH/USDT", "XRP/USDT", "USDT/USDT", "BNB/USDT", "SOL/USDT",
     "USDC/USDT", "STETH/USDT", "DOGE/USDT", "TRX/USDT", "ADA/USDT", "XLM/USDT",
@@ -49,29 +46,19 @@ PAIRS = [
     "USDS/USDT", "ENA/USDT", "TAO/USDT", "MNT/USDT", "JITOSOL/USDT", "KAS/USDT",
     "PENGU/USDT", "ARB/USDT", "BONK/USDT", "RENDER/USDT", "POL/USDT", "WLD/USDT",
     "STORY/USDT", "TRUMP/USDT", "SEI/USDT", "SKY/USDT", "HYPE/USDT", "WBETH/USDT",
-    "MKR/USDT", "FIL/USDT", "OP/USDT", "IOTA/USDT", "FTM/USDT", "VET/USDT",
-    "INJ/USDT", "GRT/USDT", "SAND/USDT", "AXS/USDT", "MANA/USDT", "CHZ/USDT",
-    "FLOW/USDT", "GALA/USDT", "KSM/USDT", "ZEC/USDT", "QTUM/USDT", "OMG/USDT",
-    "ENJ/USDT", "BAT/USDT", "DASH/USDT", "TUSD/USDT", "PAXG/USDT", "PYTH/USDT",
-    "WETH/USDT", "BTT/USDT", "CELO/USDT", "DGB/USDT", "CSPR/USDT", "WTC/USDT",
-    "ZEN/USDT", "KAVA/USDT", "OCEAN/USDT", "RUNE/USDT", "WAVES/USDT" # Voltando para 90 pares
+    "MKR/USDT", "FIL/USDT", "OP/USDT", "IOTA/USDT"
 ]
 
 # Configuração de logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.INFO 
 )
 logger = logging.getLogger(__name__)
 
-# Dicionário global para armazenar instâncias de exchanges (carregadas uma vez)
 global_exchanges_instances = {}
 
-# --- Funções Auxiliares para Busca Concorrente ---
 async def fetch_all_market_data_for_pair(exchange_instances, pair):
-    """
-    Busca dados de mercado para um par específico em todas as exchanges de forma concorrente.
-    """
     tasks = []
     for ex_id, exchange in exchange_instances.items():
         if pair in exchange.markets and exchange.has['fetchOrderBook']:
@@ -90,9 +77,6 @@ async def fetch_all_market_data_for_pair(exchange_instances, pair):
     return market_data
 
 async def fetch_order_book_safe(exchange, pair, ex_id):
-    """
-    Função auxiliar para buscar o livro de ofertas de forma segura.
-    """
     try:
         order_book = await exchange.fetch_order_book(pair, limit=100)
         if order_book and order_book['bids'] and order_book['asks']:
@@ -119,7 +103,6 @@ async def fetch_order_book_safe(exchange, pair, ex_id):
         logger.warning(f"Erro inesperado ao buscar {pair} em {ex_id}: {e}")
     return None
 
-# Função principal para checar arbitragem
 async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
     bot = context.bot
     job = context.job
@@ -182,7 +165,7 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
                             sell_data['bid_volume'] >= required_sell_volume
                         )
 
-                        if has_sufficient_liquidez:
+                        if has_sufficient_liquidity:
                             opportunity_key = (pair, buy_ex_id, sell_ex_id)
                             current_scan_opportunities[opportunity_key] = {
                                 'buy_price': buy_price,
@@ -190,7 +173,7 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
                                 'net_profit': net_profit_percentage,
                                 'volume': trade_amount_usd
                             }
-        # Código para remover e notificar oportunidades canceladas permanece o mesmo...
+
         opportunities_to_remove_from_active = []
         for key, opp_data in context.bot_data['active_opportunities'].items():
             if key not in current_scan_opportunities:
@@ -253,7 +236,6 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
     finally:
         pass
 
-# Comando /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.bot_data['admin_chat_id'] = update.message.chat_id
     await update.message.reply_text(
@@ -271,7 +253,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     logger.info(f"Bot iniciado por chat_id: {update.message.chat_id}")
 
-# Comando /setlucro
 async def setlucro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         valor = float(context.args[0])
@@ -284,7 +265,6 @@ async def setlucro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except (IndexError, ValueError):
         await update.message.reply_text("Uso incorreto. Exemplo: /setlucro 2.5")
 
-# Comando /setvolume
 async def setvolume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         valor = float(context.args[0])
@@ -297,7 +277,6 @@ async def setvolume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except (IndexError, ValueError):
         await update.message.reply_text("Uso incorreto. Exemplo: /setvolume 100")
 
-# Comando /setfee
 async def setfee(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         valor = float(context.args[0])
@@ -310,7 +289,6 @@ async def setfee(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except (IndexError, ValueError):
         await update.message.reply_text("Uso incorreto. Exemplo: /setfee 0.075")
 
-# FUNÇÃO PRINCIPAL DO BOT
 async def main():
     application = ApplicationBuilder().token(TOKEN).build()
 
