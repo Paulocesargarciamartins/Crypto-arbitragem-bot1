@@ -89,8 +89,8 @@ async def setlucro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except (IndexError, ValueError):
         await update.message.reply_text("Uso incorreto. Exemplo: /setlucro 2.5")
 
-# Função principal do bot
-async def main():
+# FUNÇÃO PRINCIPAL DO BOT (ALTERADA)
+def main():
     application = ApplicationBuilder().token(TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
@@ -102,14 +102,14 @@ async def main():
 
     application.job_queue.run_repeating(periodic_arbitrage_task, interval=60, first=5)
 
-    # Comandos oficiais (exibir no Telegram)
-    await application.bot.set_my_commands([
+    # Comandos oficiais (exibir no Telegram).
+    asyncio.run(application.bot.set_my_commands([
         BotCommand("start", "Iniciar o bot"),
         BotCommand("setlucro", "Definir lucro mínimo em %")
-    ])
+    ]))
 
     logger.info("Bot iniciado com sucesso.")
-    await application.run_polling()
+    application.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
