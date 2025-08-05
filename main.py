@@ -74,21 +74,24 @@ async def set_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         await update.message.reply_text("Uso correto: /set 2.5")
 
-# Inicialização principal
-async def main():
+# Inicialização
+async def loop_arbitragem(app):
+    while True:
+        try:
+            await verificar_arbitragem(app)
+        except Exception as e:
+            await send_telegram_message(app, f"Erro: {str(e)}")
+        await asyncio.sleep(60)
+
+def main():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("set", set_command))
 
-    async def loop_arbitragem():
-        while True:
-            try:
-                await verificar_arbitragem(app)
-            except Exception as e:
-                await send_telegram_message(app, f"Erro: {str(e)}")
-            await asyncio.sleep(60)
+    # Inicia o loop de arbitragem em paralelo
+    app.job_queue.run_repeating(lambda _: asyncio.create_task(loop_arbitragem(app)), interval=60, first=1)
 
-    asyncio.create_task(loop_arbitragem())
-    await app.run_polling()
+    # Inicia o bot (bloqueante, já controla o loop de eventos)
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
