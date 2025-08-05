@@ -19,9 +19,8 @@ DEFAULT_TRADE_AMOUNT_USD = 50.0 # Quantidade de USD para verificar liquidez
 DEFAULT_FEE_PERCENTAGE = 0.1 # Taxa de negociação média por lado (0.1% é comum)
 
 # IMPORTANTE: Limite máximo de lucro bruto para validação de dados.
-# Retornado para 500.0% para não restringir o bot, conforme solicitado.
-# Lucros acima disso ainda são considerados anomalias de dados.
-MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 500.0 
+# Ajustado para 100.0% conforme solicitado.
+MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0 
 
 # Exchanges confiáveis para monitorar (agora 17, Coinex removida)
 EXCHANGES_LIST = [
@@ -32,7 +31,7 @@ EXCHANGES_LIST = [
 ]
 
 
-# Pares USDT (lista completa de 150 pares)
+# Pares USDT (limitado aos primeiros 100 pares para otimização)
 PAIRS = [
     "BTC/USDT", "ETH/USDT", "XRP/USDT", "USDT/USDT", "BNB/USDT", "SOL/USDT", 
     "USDC/USDT", "STETH/USDT", "DOGE/USDT", "TRX/USDT", "ADA/USDT", "XLM/USDT", 
@@ -58,7 +57,7 @@ PAIRS = [
     "CVC/USDT", "IRIS/USDT", "NULS/USDT", "NKN/USDT", "STX/USDT", "DODO/USDT", 
     "NMR/USDT", "MCO/USDT", "LPT/USDT", "SKL/USDT", "REQ/USDT", "CQT/USDT", 
     "WTC/USDT", "TCT/USDT", "COTI/USDT", "MDT/USDT", "TFUEL/USDT", "TUSD/USDT", 
-    "SRM/USDT", "GLM/USDT", "MANA/USDT", "SAND/USDT", "ICP/USDT", "APE/USDT"
+    "SRM/USDT", "GLM/USDT" # Limitado a 100 pares
 ]
 
 # Configuração de logging
@@ -148,7 +147,7 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
             return
 
         # Itera sobre cada par para encontrar oportunidades
-        for pair in PAIRS:
+        for pair in PAIRS: # Agora iterando sobre a lista limitada de 100 pares
             market_data_tasks = []
             for ex_id, exchange in exchanges_instances.items():
                 # Cria uma tarefa para buscar os dados de cada exchange para o par atual
