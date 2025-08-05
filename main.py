@@ -17,19 +17,20 @@ DEFAULT_LUCRO_MINIMO_PORCENTAGEM = 2.0
 DEFAULT_TRADE_AMOUNT_USD = 50.0 # Quantidade de USD para verificar liquidez
 DEFAULT_FEE_PERCENTAGE = 0.1 # Taxa de negociação média por lado (0.1% é comum)
 
-# Novo: Limite máximo de lucro bruto para validação de dados.
+# Limite máximo de lucro bruto para validação de dados.
 # Se o lucro bruto for maior que isso, consideramos que os dados estão incorretos.
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 500.0 # 500% é um valor muito alto, mas seguro para filtrar erros grotescos.
 
 # Exchanges confiáveis para monitorar (20)
-# Nota: Nem todas as exchanges suportam todos os pares ou têm as mesmas APIs.
-# Algumas podem exigir chaves de API para acesso a dados de mercado.
+# REMOVIDAS 'lbank' e 'gateio' temporariamente devido a dados inconsistentes nos logs.
+# Você pode adicioná-las de volta se os problemas de dados forem resolvidos.
 EXCHANGES_LIST = [
     'binance', 'coinbasepro', 'kraken', 'bitfinex', 'bittrex',
-    'huobipro', 'okex', 'bitstamp', 'gateio', 'kucoin',
+    'huobipro', 'okex', 'bitstamp', 'kucoin',
     'poloniex', 'bybit', 'coinex', 'bitget', 'ascendex',
-    'bibox', 'bitflyer', 'digifinex', 'mexc', 'lbank' # Substituindo ftx (falida) e adicionando mais algumas
+    'bibox', 'bitflyer', 'digifinex', 'mexc', 'lbank'
 ]
+
 
 # Pares USDT (reduzido para evitar sobrecarga de requisições durante o teste/exemplo)
 # Para produção, você pode usar a lista completa de 150 pares.
@@ -99,8 +100,8 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
                     # Verifica se o par existe na exchange e se suporta fetch_order_book
                     if pair in exchange.markets and exchange.has['fetchOrderBook']:
                         # Busca o livro de ofertas para verificar liquidez
-                        # Aumentado o limite para 20 para uma visão mais robusta
-                        order_book = await exchange.fetch_order_book(pair, limit=20) 
+                        # Aumentado o limite para 100 para uma visão mais robusta e compatibilidade com Kucoin
+                        order_book = await exchange.fetch_order_book(pair, limit=100) 
                         
                         if order_book and order_book['bids'] and order_book['asks']:
                             best_bid = order_book['bids'][0][0] # Melhor preço de compra (para quem vende)
@@ -168,7 +169,7 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
 
             gross_profit_percentage = ((best_sell_price - best_buy_price) / best_buy_price) * 100
 
-            # Novo: Sanity check para o lucro bruto
+            # Sanity check para o lucro bruto
             if gross_profit_percentage > MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK:
                 logger.warning(f"Lucro bruto irrealista para {pair} ({gross_profit_percentage:.2f}%). "
                                f"Dados suspeitos: Comprar em {best_buy_ex}: {best_buy_price}, Vender em {best_sell_ex}: {best_sell_price}. Pulando.")
