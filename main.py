@@ -5,6 +5,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, JobQu
 import ccxt.async_support as ccxt
 import os
 import nest_asyncio
+from datetime import datetime
 
 # Aplica o patch para permitir loops aninhados,
 # corrigindo o problema no ambiente Heroku
@@ -18,16 +19,15 @@ DEFAULT_TRADE_AMOUNT_USD = 50.0 # Quantidade de USD para verificar liquidez
 DEFAULT_FEE_PERCENTAGE = 0.1 # Taxa de negociação média por lado (0.1% é comum)
 
 # Limite máximo de lucro bruto para validação de dados.
-# Se o lucro bruto for maior que isso, consideramos que os dados estão incorretos.
-MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 500.0 # 500% é um valor muito alto, mas seguro para filtrar erros grotescos.
+# Ajustado para 100.0% conforme solicitado.
+MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0 
 
-# Exchanges confiáveis para monitorar (20)
-# Nomes ajustados para corresponder aos IDs do CCXT.
+# Exchanges confiáveis para monitorar (agora 17, Coinex removida)
 EXCHANGES_LIST = [
-    'binance', 'coinbase', 'kraken', 'bitfinex', 'bittrex', # 'coinbasepro' -> 'coinbase'
-    'huobi', 'okx', 'bitstamp', 'kucoin', # 'huobipro' -> 'huobi', 'okex' -> 'okx'
-    'poloniex', 'bybit', 'coinex', 'bitget', 'ascendex',
-    'bibox', 'bitflyer', 'digifinex', 'mexc'
+    'binance', 'coinbase', 'kraken', 'bitfinex', 'bittrex',
+    'huobi', 'okx', 'bitstamp', 'kucoin',
+    'poloniex', 'bybit', 'bitget', 'ascendex', 
+    'bibox', 'bitflyer', 'digifinex', 'mexc' 
 ]
 
 
@@ -211,8 +211,9 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
             )
 
             if net_profit_percentage >= lucro_minimo_porcentagem and has_sufficient_liquidity:
-                # Mensagem de alerta simplificada
-                msg = (f"💰 Arbitragem para {pair}!\n"
+                # Mensagem de alerta simplificada com timestamp
+                current_time = datetime.now().strftime("%H:%M:%S")
+                msg = (f"💰 Arbitragem para {pair} ({current_time})!\n"
                        f"Compre em {best_buy_ex}: {best_buy_price:.8f}\n"
                        f"Venda em {best_sell_ex}: {best_sell_price:.8f}\n"
                        f"Lucro Líquido: {net_profit_percentage:.2f}%\n"
@@ -307,8 +308,8 @@ async def main():
 
     # Adiciona a tarefa periódica de arbitragem
     # O 'first=5' faz a primeira execução 5 segundos após o bot iniciar
-    # O 'interval=60' executa a cada 60 segundos
-    application.job_queue.run_repeating(check_arbitrage, interval=60, first=5)
+    # O 'interval=90' executa a cada 90 segundos (1.5 minutos)
+    application.job_queue.run_repeating(check_arbitrage, interval=90, first=5)
 
     # Define os comandos que aparecerão no Telegram
     await application.bot.set_my_commands([
