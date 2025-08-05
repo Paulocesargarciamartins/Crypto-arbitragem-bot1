@@ -5,7 +5,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, JobQu
 import ccxt.async_support as ccxt
 import os
 import nest_asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # Aplica o patch para permitir loops aninhados,
 # corrigindo o problema no ambiente Heroku
@@ -22,20 +22,12 @@ DEFAULT_FEE_PERCENTAGE = 0.1 # Taxa de negociação média por lado (0.1% é com
 # Mantido em 100.0% conforme solicitado.
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0 
 
-# Período de cooldown para evitar alertas repetidos para a mesma oportunidade (em segundos).
-COOLDOWN_PERIOD_FOR_ALERTS = 300 
-# Tolerância para considerar preços "iguais" para o cooldown (0.01% de diferença)
-PRICE_COOLDOWN_TOLERANCE_PERCENT = 0.01 
-# Porcentagem de mudança no lucro líquido para re-alertar uma oportunidade existente antes do cooldown expirar
-PROFIT_CHANGE_ALERT_THRESHOLD_PERCENT = 0.5 
-
 # Exchanges confiáveis para monitorar (Bittrex, Bibox, Huobi removidas devido a erros nos logs)
 EXCHANGES_LIST = [
     'binance', 'coinbase', 'kraken', 'bitfinex',
     'okx', 'bitstamp', 'kucoin', 'bybit', 'bitget',
-    'ascendex', 'mexc', 'poloniex' # Poloniex mantida, mas monitoraremos seu comportamento
+    'ascendex', 'mexc', 'poloniex' 
 ]
-
 
 # Pares USDT (limitado aos primeiros 100 pares para otimização)
 PAIRS = [
@@ -125,12 +117,6 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
     lucro_minimo_porcentagem = context.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)
     trade_amount_usd = context.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD)
     fee_percentage = context.bot_data.get('fee_percentage', DEFAULT_FEE_PERCENTAGE)
-
-    # NOVO: Inicializa o dicionário para rastrear as oportunidades ativas e os últimos alertas
-    if 'active_opportunities' not in context.bot_data:
-        context.bot_data['active_opportunities'] = {} # { (pair, buy_ex, sell_ex): { 'buy_price': float, 'sell_price': float, 'net_profit': float, 'last_alert_time': datetime } }
-
-    current_scan_opportunities = {} # Oportunidades válidas encontradas nesta varredura
 
     logger.info(f"Iniciando checagem de arbitragem. Lucro mínimo: {lucro_minimo_porcentagem}%, Volume de trade: {trade_amount_usd} USD")
 
@@ -222,76 +208,21 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
                 best_sell_volume >= required_sell_volume
             )
 
-            # Se a oportunidade atende aos critérios mínimos, adiciona à lista da varredura atual
             if net_profit_percentage >= lucro_minimo_porcentagem and has_sufficient_liquidity:
-                opportunity_key = (pair, best_buy_ex, best_sell_ex)
-                current_scan_opportunities[opportunity_key] = {
-                    'buy_price': best_buy_price,
-                    'sell_price': best_sell_price,
-                    'net_profit': net_profit_percentage,
-                    'volume': trade_amount_usd
-                }
+                # Mensagem de alerta simplificada com timestamp
+                current_time = datetime.now().strftime("%H:%M:%S")
+                msg = (f"💰 Arbitragem para {pair} ({current_time})!\n"
+                       f"Compre em {best_buy_ex}: {best_buy_price:.8f}\n"
+                       f"Venda em {best_sell_ex}: {best_sell_price:.8f}\n"
+                       f"Lucro Líquido: {net_profit_percentage:.2f}%\n"
+                       f"Volume: ${trade_amount_usd:.2f}"
+                )
+                logger.info(msg)
+                await bot.send_message(chat_id=chat_id, text=msg)
             else:
                 logger.debug(f"Arbitragem para {pair} não atende aos critérios: "
                              f"Lucro Líquido: {net_profit_percentage:.2f}% (Mínimo: {lucro_minimo_porcentagem}%), "
                              f"Liquidez Suficiente: {has_sufficient_liquidity}")
-
-        # --- Lógica de Comparação e Alerta Inteligente ---
-        opportunities_to_remove = []
-        # Verifica oportunidades ativas que não foram encontradas nesta varredura (oportunidades canceladas)
-        for key, last_opp_data in context.bot_data['active_opportunities'].items():
-            if key not in current_scan_opportunities:
-                # Oportunidade não encontrada na varredura atual, enviar alerta de cancelamento
-                pair, buy_ex, sell_ex = key
-                msg = (f"❌ Oportunidade para {pair} (CANCELADA)!\n"
-                       f"Anteriormente: Compre em {buy_ex}: {last_opp_data['buy_price']:.8f}, Venda em {sell_ex}: {last_opp_data['sell_price']:.8f}\n"
-                       f"Lucro Líquido Anterior: {last_opp_data['net_profit']:.2f}%\n"
-                       f"Volume: ${last_opp_data['volume']:.2f}"
-                )
-                logger.info(msg)
-                await bot.send_message(chat_id=chat_id, text=msg)
-                opportunities_to_remove.append(key)
-        
-        # Remove as oportunidades canceladas do dicionário de ativos
-        for key in opportunities_to_remove:
-            del context.bot_data['active_opportunities'][key]
-
-        # Verifica novas oportunidades ou oportunidades com mudanças significativas
-        for key, current_opp_data in current_scan_opportunities.items():
-            pair, buy_ex, sell_ex = key
-            last_opp_data = context.bot_data['active_opportunities'].get(key)
-            current_time_dt = datetime.now()
-
-            should_alert = False
-            if last_opp_data is None: # Nova oportunidade
-                should_alert = True
-            else:
-                # Oportunidade existente: verifica mudança no lucro ou cooldown
-                profit_diff = abs(current_opp_data['net_profit'] - last_opp_data['net_profit'])
-                time_since_last_alert = (current_time_dt - last_opp_data['last_alert_time']).total_seconds()
-
-                if profit_diff >= PROFIT_CHANGE_ALERT_THRESHOLD_PERCENT:
-                    should_alert = True # Lucro mudou significativamente
-                elif time_since_last_alert >= COOLDOWN_PERIOD_FOR_ALERTS:
-                    should_alert = True # Cooldown expirou, mesmo que o lucro não tenha mudado muito
-
-            if should_alert:
-                msg = (f"💰 Arbitragem para {pair} ({current_time_dt.strftime('%H:%M:%S')})!\n"
-                       f"Compre em {buy_ex}: {current_opp_data['buy_price']:.8f}\n"
-                       f"Venda em {sell_ex}: {current_opp_data['sell_price']:.8f}\n"
-                       f"Lucro Líquido: {current_opp_data['net_profit']:.2f}%\n"
-                       f"Volume: ${current_opp_data['volume']:.2f}"
-                )
-                logger.info(msg)
-                await bot.send_message(chat_id=chat_id, text=msg)
-                # Atualiza os dados da oportunidade ativa
-                context.bot_data['active_opportunities'][key] = {
-                    'buy_price': current_opp_data['buy_price'],
-                    'sell_price': current_opp_data['sell_price'],
-                    'net_profit': current_opp_data['net_profit'],
-                    'volume': current_opp_data['volume'],
-                    'last_alert_time': current_time_dt
-                }
 
     except Exception as e:
         logger.error(f"Erro geral na checagem de arbitragem: {e}", exc_info=True)
