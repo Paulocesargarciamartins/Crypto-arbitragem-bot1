@@ -1,8 +1,9 @@
+python-telegram-bot==20.7
 ccxt
 aiohttp
 requests
-python-telegram-bot[job-queue]==20.7
 apscheduler
 flask
 gunicorn
 python-dotenv
+nest_asyncio
