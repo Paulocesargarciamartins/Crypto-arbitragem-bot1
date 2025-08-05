@@ -18,9 +18,9 @@ DEFAULT_LUCRO_MINIMO_PORCENTAGEM = 2.0
 DEFAULT_TRADE_AMOUNT_USD = 50.0 # Quantidade de USD para verificar liquidez
 DEFAULT_FEE_PERCENTAGE = 0.1 # Taxa de negociação média por lado (0.1% é comum)
 
-# Limite máximo de lucro bruto para validação de dados.
-# Ajustado para 100.0% conforme solicitado.
-MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0 
+# IMPORTANTE: Limite máximo de lucro bruto para validação de dados.
+# Qualquer oportunidade com lucro bruto acima de 5.0% será ignorada.
+MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 5.0 
 
 # Exchanges confiáveis para monitorar (agora 17, Coinex removida)
 EXCHANGES_LIST = [
@@ -131,7 +131,7 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
                 exchange_class = getattr(ccxt, ex_id)
                 exchange = exchange_class({
                     'enableRateLimit': True, # Garante que o ccxt respeite os limites de taxa da API
-                    'timeout': 5000, # Reduzido timeout para 5 segundos para requisições mais rápidas
+                    'timeout': 3000, # Reduzido timeout para 3 segundos para requisições mais rápidas
                 })
                 await exchange.load_markets()
                 exchanges_instances[ex_id] = exchange
@@ -156,6 +156,7 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
                 )
             
             # Executa todas as tarefas de busca para o par atual CONCORRENTEMENTE
+            # return_exceptions=True garante que se uma tarefa falhar, as outras continuam.
             results = await asyncio.gather(*market_data_tasks, return_exceptions=True)
 
             market_data = {}
