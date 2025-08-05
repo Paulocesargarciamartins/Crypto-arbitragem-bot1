@@ -1,204 +1,130 @@
 import os
-import asyncio
-import aiohttp
 import logging
-from telegram import Bot, Update
+from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import aiohttp
 
-# Configurações iniciais
-TOKEN = os.environ.get("TOKEN")
-CHAT_ID = os.environ.get("CHAT_ID") or "1093248456"
-
-# Setup logging
+# Configuração básica do logging
 logging.basicConfig(
     format='[%(levelname)s] %(asctime)s - %(message)s',
     level=logging.DEBUG
 )
 logger = logging.getLogger(__name__)
 
-# Inicializa bot Telegram
-bot = Bot(token=TOKEN)
+TOKEN = os.environ.get("TOKEN")
+CHAT_ID = os.environ.get("CHAT_ID", "1093248456")
 
-# Configuráveis pelo usuário via Telegram (padrões)
-lucro_minimo = 1.0  # % mínimo para enviar alerta
+# Parâmetros
+DEFAULT_MIN_PROFIT = 1.0  # lucro mínimo em %
 
-# Exchanges e URL base para consultar preço
-exchanges = {
-    "binance": "https://api.binance.com/api/v3/ticker/price?symbol={}",
-    "coinbase": "https://api.coinbase.com/v2/prices/{}-USDT/spot",
-    "kucoin": "https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={}",
-    "bitstamp": "https://www.bitstamp.net/api/v2/ticker/{}",
-    "bittrex": "https://api.bittrex.com/v3/markets/{}/ticker",
-    "gateio": "https://api.gate.io/api2/1/tickers",
-    "okx": "https://www.okx.com/api/v5/market/ticker?instId={}",
-    "bybit": "https://api.bybit.com/v2/public/tickers?symbol={}",
-    "poloniex": "https://poloniex.com/public?command=returnTicker",
-    "huobi": "https://api.huobi.pro/market/detail/merged?symbol={}",
-    "bitfinex": "https://api-pub.bitfinex.com/v2/tickers?symbols=t{}",
-    "mercadobitcoin": "https://www.mercadobitcoin.net/api/{}/ticker/",
-    "kraken": "https://api.kraken.com/0/public/Ticker?pair={}",
-    "bitmex": "https://www.bitmex.com/api/v1/instrument?symbol={}",
-    "bitflyer": "https://api.bitflyer.com/v1/ticker?product_code={}",
-    "hitbtc": "https://api.hitbtc.com/api/2/public/ticker/{}",
-    "bitstamp2": "https://www.bitstamp.net/api/v2/ticker/{}",
-    "deribit": "https://www.deribit.com/api/v2/public/ticker?instrument_name={}",
-    "ftx": "https://ftx.com/api/markets/{}",
-    "liquid": "https://api.liquid.com/products/{}",
-}
-
-# Lista simplificada das top 100 pares USDT para exemplo (você pode atualizar)
-pares_usdt = [
-    "BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT", "SOLUSDT", "DOGEUSDT", "DOTUSDT",
-    "MATICUSDT", "LTCUSDT", "SHIBUSDT", "TRXUSDT", "AVAXUSDT", "UNIUSDT", "LINKUSDT",
-    "ALGOUSDT", "ATOMUSDT", "XLMUSDT", "VETUSDT", "ICPUSDT",
-    # ... complete até 100 pares
+# Lista de pares USDT (exemplo com 15 pares, pode expandir)
+pairs = [
+    "BTCUSDT", "ETHUSDT", "XRPUSDT", "LTCUSDT", "BCHUSDT",
+    "BNBUSDT", "DOGEUSDT", "ADAUSDT", "SOLUSDT", "DOTUSDT",
+    "AVAXUSDT", "TRXUSDT", "SHIBUSDT", "MATICUSDT", "ATOMUSDT"
 ]
 
-async def fetch_price(session, exchange, symbol):
-    url = None
-    symbol_api = symbol
+# Exchanges e seus endpoints para obter preço
+exchanges = {
+    "Binance": "https://api.binance.com/api/v3/ticker/price?symbol={}",
+    "Coinbase": "https://api.coinbase.com/v2/prices/{}-USDT/spot",
+    "KuCoin": "https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={}",
+    "Bitstamp": "https://www.bitstamp.net/api/v2/ticker/{}.json",
+    "MercadoBitcoin": "https://www.mercadobitcoin.net/api/{}/ticker/",
+}
+
+# Variável global para lucro mínimo, atualizável via comando
+min_profit = DEFAULT_MIN_PROFIT
+
+async def get_price(session: aiohttp.ClientSession, exchange: str, symbol: str):
+    url = exchanges[exchange].format(symbol)
     try:
-        if exchange == "binance":
-            url = exchanges[exchange].format(symbol)
-            async with session.get(url) as r:
-                data = await r.json()
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                logger.warning(f"[Erro] {exchange}: status {resp.status} para {url}")
+                return None
+            data = await resp.json()
+            if exchange == "Binance":
                 return float(data['price'])
-        elif exchange == "coinbase":
-            url = exchanges[exchange].format(symbol[:-4])  # Exemplo: BTCUSDT -> BTC
-            async with session.get(url) as r:
-                data = await r.json()
+            elif exchange == "Coinbase":
                 return float(data['data']['amount'])
-        elif exchange == "kucoin":
-            url = exchanges[exchange].format(symbol)
-            async with session.get(url) as r:
-                data = await r.json()
+            elif exchange == "KuCoin":
                 return float(data['data']['price'])
-        elif exchange == "bitstamp":
-            symbol_bs = symbol[:-4].lower() + "usd"  # BTCUSDT -> btcusd (bitstamp usa USD)
-            url = exchanges[exchange].format(symbol_bs)
-            async with session.get(url) as r:
-                data = await r.json()
+            elif exchange == "Bitstamp":
                 return float(data['last'])
-        elif exchange == "bittrex":
-            symbol_br = symbol[:-4] + "-USDT"
-            url = exchanges[exchange].format(symbol_br)
-            async with session.get(url) as r:
-                data = await r.json()
-                return float(data['lastTradeRate'])
-        elif exchange == "gateio":
-            # gate.io retorna todos, precisamos parsear
-            url = exchanges[exchange]
-            async with session.get(url) as r:
-                data = await r.json()
-                ticker = data.get(symbol.lower() + "_usdt")
-                if ticker:
-                    return float(ticker['last'])
-                return None
-        elif exchange == "okx":
-            url = exchanges[exchange].format(symbol)
-            async with session.get(url) as r:
-                data = await r.json()
-                if 'data' in data and len(data['data'])>0:
-                    return float(data['data'][0]['last'])
-                return None
-        elif exchange == "bybit":
-            url = exchanges[exchange].format(symbol)
-            async with session.get(url) as r:
-                data = await r.json()
-                if 'result' in data and len(data['result'])>0:
-                    return float(data['result'][0]['last_price'])
-                return None
-        # ... Você pode adicionar os outros exchanges aqui com seu parsing correto
-        else:
-            return None
+            elif exchange == "MercadoBitcoin":
+                return float(data['ticker']['last'])
     except Exception as e:
-        logger.error(f"[Erro] {exchange}: {e} url={url}")
+        logger.warning(f"[Erro] {exchange}: {e}")
         return None
 
-async def check_arbitrage():
+async def check_arbitrage(bot):
     async with aiohttp.ClientSession() as session:
-        for pair in pares_usdt:
+        for pair in pairs:
             prices = {}
-            for ex in exchanges.keys():
-                price = await fetch_price(session, ex, pair)
+            for exchange in exchanges:
+                price = await get_price(session, exchange, pair)
                 if price:
-                    prices[ex] = price
-
+                    prices[exchange] = price
             if len(prices) >= 2:
                 min_ex = min(prices, key=prices.get)
                 max_ex = max(prices, key=prices.get)
                 min_price = prices[min_ex]
                 max_price = prices[max_ex]
-                lucro = ((max_price - min_price) / min_price) * 100
-
-                logger.debug(f"{pair} preços: {prices}")
-
-                if lucro >= lucro_minimo:
-                    texto = (
-                        f"💰 Oportunidade de Arbitragem!\n"
+                profit = ((max_price - min_price) / min_price) * 100
+                logger.debug(f"{pair} - Preços: {prices}")
+                if profit >= min_profit:
+                    message = (
+                        f"💰 Oportunidade de arbitragem!\n\n"
                         f"🪙 Par: {pair}\n"
-                        f"🔻 Comprar: {min_ex} a {min_price:.6f}\n"
-                        f"🔺 Vender: {max_ex} a {max_price:.6f}\n"
-                        f"📈 Lucro estimado: {lucro:.2f}%"
+                        f"🔻 Comprar: {min_ex} a {min_price:.2f}\n"
+                        f"🔺 Vender: {max_ex} a {max_price:.2f}\n"
+                        f"📈 Lucro estimado: {profit:.2f}%"
                     )
                     try:
-                        await bot.send_message(chat_id=CHAT_ID, text=texto)
+                        await bot.send_message(chat_id=CHAT_ID, text=message)
+                        logger.info(f"Alerta enviado para {pair} com lucro {profit:.2f}%")
                     except Exception as e:
                         logger.error(f"Erro ao enviar mensagem Telegram: {e}")
 
-# Comandos Telegram para configurar e obter status
-
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Olá! Bot de Arbitragem iniciado.\n"
-        "Use /lucro para ver ou definir lucro mínimo para alertas.\n"
-        "Exemplo: /lucro 1.5\n"
-        "Use /pares para listar alguns pares.\n"
-        "Use /exchanges para listar exchanges monitoradas."
+        "Olá! Sou seu bot de arbitragem.\n"
+        "Use /setprofit <valor> para definir o lucro mínimo em %.\n"
+        "Exemplo: /setprofit 1.5"
     )
 
-async def cmd_lucro(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global lucro_minimo
-    args = context.args
-    if args and len(args) == 1:
-        try:
-            novo_valor = float(args[0])
-            lucro_minimo = novo_valor
-            await update.message.reply_text(f"Lucro mínimo atualizado para {lucro_minimo}%")
-        except ValueError:
-            await update.message.reply_text("Use um número válido. Exemplo: /lucro 1.5")
-    else:
-        await update.message.reply_text(f"Lucro mínimo atual: {lucro_minimo}%")
+async def set_profit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global min_profit
+    try:
+        if len(context.args) != 1:
+            raise ValueError("Número errado de argumentos")
+        value = float(context.args[0].replace(',', '.'))
+        if value <= 0:
+            raise ValueError("Lucro deve ser maior que zero")
+        min_profit = value
+        await update.message.reply_text(f"Lucro mínimo configurado para {min_profit}%")
+    except Exception:
+        await update.message.reply_text("Uso correto: /setprofit <valor_em_porcentagem>")
 
-async def cmd_pares(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lista = ", ".join(pares_usdt[:20])
-    await update.message.reply_text(f"Pares monitorados (top 20):\n{lista}")
+async def arbitrage_job(app):
+    await check_arbitrage(app.bot)
 
-async def cmd_exchanges(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lista = ", ".join(exchanges.keys())
-    await update.message.reply_text(f"Exchanges monitoradas:\n{lista}")
-
-async def loop_arbitragem(application):
-    while True:
-        logger.info("Verificando arbitragem...")
-        await check_arbitrage()
-        await asyncio.sleep(60)
+async def periodic_arbitrage(context: ContextTypes.DEFAULT_TYPE):
+    await check_arbitrage(context.bot)
 
 async def main():
-    application = ApplicationBuilder().token(TOKEN).build()
-    application.add_handler(CommandHandler("start", cmd_start))
-    application.add_handler(CommandHandler("lucro", cmd_lucro))
-    application.add_handler(CommandHandler("pares", cmd_pares))
-    application.add_handler(CommandHandler("exchanges", cmd_exchanges))
+    app = ApplicationBuilder().token(TOKEN).build()
 
-    # Start arbitrage loop in background
-    asyncio.create_task(loop_arbitragem(application))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("setprofit", set_profit))
 
-    # Run bot until interrupted
-    await application.run_polling()
+    # Executa a checagem a cada 60 segundos
+    app.job_queue.run_repeating(periodic_arbitrage, interval=60, first=5)
+
+    logger.info("Bot iniciado")
+    await app.run_polling()
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("Bot finalizado")
+    import asyncio
+    asyncio.run(main())
