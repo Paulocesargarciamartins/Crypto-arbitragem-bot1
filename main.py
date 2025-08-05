@@ -30,13 +30,15 @@ PROFIT_CHANGE_ALERT_THRESHOLD_PERCENT = 0.5 # Ex: se o lucro mudar em 0.5% ou ma
 # antes de um alerta de cancelamento ser enviado.
 CANCELLATION_CONFIRM_SCANS = 2 # Ex: 2 varreduras (2 minutos com intervalo de 60s)
 
-# Exchanges confiáveis para monitorar (reduzido para as 10 maiores/mais confiáveis)
+# Exchanges confiáveis para monitorar
 EXCHANGES_LIST = [
     'binance', 'coinbase', 'kraken', 'okx', 'bybit',
-    'kucoin', 'bitstamp', 'bitfinex', 'bitget', 'mexc'
+    'kucoin', 'bitstamp', 'bitfinex', 'bitget', 'mexc',
+    'huobi', 'gateio', 'bitmex', 'exmo', 'upbit',
+    'coinone', 'bithumb', 'phemex', 'lbank', 'ftx' # Voltou a ter 20 exchanges
 ]
 
-# Pares USDT (reduzido para os primeiros 60 pares para otimização)
+# Pares USDT (Voltou a ter mais pares para um universo maior)
 PAIRS = [
     "BTC/USDT", "ETH/USDT", "XRP/USDT", "USDT/USDT", "BNB/USDT", "SOL/USDT",
     "USDC/USDT", "STETH/USDT", "DOGE/USDT", "TRX/USDT", "ADA/USDT", "XLM/USDT",
@@ -47,13 +49,18 @@ PAIRS = [
     "USDS/USDT", "ENA/USDT", "TAO/USDT", "MNT/USDT", "JITOSOL/USDT", "KAS/USDT",
     "PENGU/USDT", "ARB/USDT", "BONK/USDT", "RENDER/USDT", "POL/USDT", "WLD/USDT",
     "STORY/USDT", "TRUMP/USDT", "SEI/USDT", "SKY/USDT", "HYPE/USDT", "WBETH/USDT",
-    "MKR/USDT", "FIL/USDT", "OP/USDT", "IOTA/USDT" # Primeiros 60 pares
+    "MKR/USDT", "FIL/USDT", "OP/USDT", "IOTA/USDT", "FTM/USDT", "VET/USDT",
+    "INJ/USDT", "GRT/USDT", "SAND/USDT", "AXS/USDT", "MANA/USDT", "CHZ/USDT",
+    "FLOW/USDT", "GALA/USDT", "KSM/USDT", "ZEC/USDT", "QTUM/USDT", "OMG/USDT",
+    "ENJ/USDT", "BAT/USDT", "DASH/USDT", "TUSD/USDT", "PAXG/USDT", "PYTH/USDT",
+    "WETH/USDT", "BTT/USDT", "CELO/USDT", "DGB/USDT", "CSPR/USDT", "WTC/USDT",
+    "ZEN/USDT", "KAVA/USDT", "OCEAN/USDT", "RUNE/USDT", "WAVES/USDT" # Voltando para 90 pares
 ]
 
 # Configuração de logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO 
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
@@ -61,34 +68,49 @@ logger = logging.getLogger(__name__)
 global_exchanges_instances = {}
 
 # --- Funções Auxiliares para Busca Concorrente ---
-async def fetch_market_data_for_exchange(exchange, pair, ex_id):
+async def fetch_all_market_data_for_pair(exchange_instances, pair):
     """
-    Busca dados de mercado para um par específico em uma única exchange.
-    Retorna uma tupla (ex_id, market_data) ou None em caso de erro/dados inválidos.
+    Busca dados de mercado para um par específico em todas as exchanges de forma concorrente.
+    """
+    tasks = []
+    for ex_id, exchange in exchange_instances.items():
+        if pair in exchange.markets and exchange.has['fetchOrderBook']:
+            tasks.append(
+                asyncio.create_task(fetch_order_book_safe(exchange, pair, ex_id))
+            )
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    market_data = {}
+    for result in results:
+        if isinstance(result, Exception):
+            logger.warning(f"Erro durante a busca concorrente de dados: {result}")
+        elif result:
+            ex_id, data = result
+            market_data[ex_id] = data
+    return market_data
+
+async def fetch_order_book_safe(exchange, pair, ex_id):
+    """
+    Função auxiliar para buscar o livro de ofertas de forma segura.
     """
     try:
-        if pair in exchange.markets and exchange.has['fetchOrderBook']:
-            order_book = await exchange.fetch_order_book(pair, limit=100)
-            if order_book and order_book['bids'] and order_book['asks']:
-                best_bid = order_book['bids'][0][0] # Melhor preço de compra (para quem vende)
-                best_bid_volume = order_book['bids'][0][1]
-                best_ask = order_book['asks'][0][0] # Melhor preço de venda (para quem compra)
-                best_ask_volume = order_book['asks'][0][1]
+        order_book = await exchange.fetch_order_book(pair, limit=100)
+        if order_book and order_book['bids'] and order_book['asks']:
+            best_bid = order_book['bids'][0][0]
+            best_bid_volume = order_book['bids'][0][1]
+            best_ask = order_book['asks'][0][0]
+            best_ask_volume = order_book['asks'][0][1]
 
-                if best_bid > 0 and best_ask > 0 and best_ask >= best_bid:
-                    return (ex_id, {
-                        'bid': best_bid,
-                        'bid_volume': best_bid_volume,
-                        'ask': best_ask,
-                        'ask_volume': best_ask_volume,
-                        'timestamp': order_book.get('timestamp')
-                    })
-                else:
-                    logger.debug(f"Dados inválidos para {pair} em {ex_id} (preço não positivo ou ask < bid): Bid={best_bid}, Ask={best_ask}")
-            else:
-                logger.debug(f"Livro de ofertas vazio ou inválido para {pair} em {ex_id}")
+            if best_bid > 0 and best_ask > 0 and best_ask >= best_bid:
+                return (ex_id, {
+                    'bid': best_bid,
+                    'bid_volume': best_bid_volume,
+                    'ask': best_ask,
+                    'ask_volume': best_ask_volume,
+                    'timestamp': order_book.get('timestamp')
+                })
         else:
-            logger.debug(f"Par {pair} não disponível ou fetchOrderBook não suportado em {ex_id}")
+            logger.debug(f"Livro de ofertas vazio ou inválido para {pair} em {ex_id}")
     except ccxt.NetworkError as e:
         logger.warning(f"Erro de rede ao buscar {pair} em {ex_id}: {e}")
     except ccxt.ExchangeError as e:
@@ -123,26 +145,11 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
 
         if len(exchanges_to_scan) < 2:
             logger.error("Não há exchanges suficientes carregadas globalmente para verificar arbitragem.")
-            await bot.send_message(chat_id=chat_id, text="Erro: Não foi possível conectar a exchanges suficientes para checar arbitragem.")
             return
 
         for pair in PAIRS:
-            market_data_tasks = []
-            for ex_id, exchange in exchanges_to_scan.items():
-                market_data_tasks.append(
-                    fetch_market_data_for_exchange(exchange, pair, ex_id)
-                )
-
-            results = await asyncio.gather(*market_data_tasks, return_exceptions=True)
-
-            market_data = {}
-            for result in results:
-                if isinstance(result, Exception):
-                    logger.warning(f"Erro durante a busca concorrente de dados: {result}")
-                elif result:
-                    ex_id, data = result
-                    market_data[ex_id] = data
-
+            market_data = await fetch_all_market_data_for_pair(exchanges_to_scan, pair)
+            
             if len(market_data) < 2:
                 continue
 
@@ -166,8 +173,6 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
 
                     net_profit_percentage = gross_profit_percentage - (2 * fee_percentage)
 
-                    logger.debug(f"DEBUG {pair} - Compra: {buy_ex_id} ({buy_price:.8f}), Venda: {sell_ex_id} ({sell_price:.8f}). Lucro Líquido: {net_profit_percentage:.2f}%. Lucro Mínimo: {lucro_minimo_porcentagem}%.")
-
                     if net_profit_percentage >= lucro_minimo_porcentagem:
                         required_buy_volume = trade_amount_usd / buy_price
                         required_sell_volume = trade_amount_usd / sell_price
@@ -177,7 +182,7 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
                             sell_data['bid_volume'] >= required_sell_volume
                         )
 
-                        if has_sufficient_liquidity:
+                        if has_sufficient_liquidez:
                             opportunity_key = (pair, buy_ex_id, sell_ex_id)
                             current_scan_opportunities[opportunity_key] = {
                                 'buy_price': buy_price,
@@ -185,7 +190,7 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
                                 'net_profit': net_profit_percentage,
                                 'volume': trade_amount_usd
                             }
-
+        # Código para remover e notificar oportunidades canceladas permanece o mesmo...
         opportunities_to_remove_from_active = []
         for key, opp_data in context.bot_data['active_opportunities'].items():
             if key not in current_scan_opportunities:
