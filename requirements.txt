@@ -1,4 +1,4 @@
-ccxt==1.111.84
+ccxt
 aiohttp
 requests
 python-telegram-bot[job-queue]==20.7
