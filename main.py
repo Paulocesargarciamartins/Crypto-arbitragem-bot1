@@ -53,7 +53,8 @@ PAIRS = [
 # Configuração de logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO # Mude para INFO para menos logs, DEBUG para mais detalhes
+    # --- ALTERAÇÃO AQUI ---
+    level=logging.DEBUG 
 )
 logger = logging.getLogger(__name__)
 
@@ -146,7 +147,6 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
             if len(market_data) < 2:
                 continue
 
-            # --- Lógica de arbitragem melhorada ---
             for buy_ex_id, buy_data in market_data.items():
                 for sell_ex_id, sell_data in market_data.items():
                     if buy_ex_id == sell_ex_id:
@@ -167,7 +167,6 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
 
                     net_profit_percentage = gross_profit_percentage - (2 * fee_percentage)
 
-                    # ADIÇÃO DE LOGS DE DEBUG AQUI
                     logger.debug(f"DEBUG {pair} - Compra: {buy_ex_id} ({buy_price:.8f}), Venda: {sell_ex_id} ({sell_price:.8f}). Lucro Líquido: {net_profit_percentage:.2f}%. Lucro Mínimo: {lucro_minimo_porcentagem}%.")
 
                     if net_profit_percentage >= lucro_minimo_porcentagem:
