@@ -22,21 +22,18 @@ DEFAULT_FEE_PERCENTAGE = 0.1 # Taxa de negociação média por lado (0.1% é com
 # Mantido em 100.0% conforme solicitado.
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0 
 
-# NOVO: Período de cooldown para evitar alertas repetidos para a mesma oportunidade (em segundos).
-# Se uma oportunidade idêntica (ou muito similar) foi alertada nos últimos 300 segundos (5 minutos),
-# não alertar novamente, a menos que haja uma mudança significativa.
+# Período de cooldown para evitar alertas repetidos para a mesma oportunidade (em segundos).
 COOLDOWN_PERIOD_FOR_ALERTS = 300 
 # Tolerância para considerar preços "iguais" para o cooldown (0.01% de diferença)
 PRICE_COOLDOWN_TOLERANCE_PERCENT = 0.01 
 # Porcentagem de mudança no lucro líquido para re-alertar uma oportunidade existente antes do cooldown expirar
-PROFIT_CHANGE_ALERT_THRESHOLD_PERCENT = 0.5 # Ex: se o lucro mudar em 0.5% ou mais, alerta novamente
+PROFIT_CHANGE_ALERT_THRESHOLD_PERCENT = 0.5 
 
-# Exchanges confiáveis para monitorar (agora 17, Coinex removida)
+# Exchanges confiáveis para monitorar (Bittrex, Bibox, Huobi removidas devido a erros nos logs)
 EXCHANGES_LIST = [
-    'binance', 'coinbase', 'kraken', 'bitfinex', 'bittrex',
-    'huobi', 'okx', 'bitstamp', 'kucoin',
-    'poloniex', 'bybit', 'bitget', 'ascendex', 
-    'bibox', 'bitflyer', 'digifinex', 'mexc' 
+    'binance', 'coinbase', 'kraken', 'bitfinex',
+    'okx', 'bitstamp', 'kucoin', 'bybit', 'bitget',
+    'ascendex', 'mexc', 'poloniex' # Poloniex mantida, mas monitoraremos seu comportamento
 ]
 
 
