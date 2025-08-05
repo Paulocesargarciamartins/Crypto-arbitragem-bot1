@@ -390,7 +390,7 @@ async def main():
     # Inicia o polling para receber atualizações do Telegram
     try:
         await application.run_polling(allowed_updates=Update.ALL_TYPES)
-    finally: # O bloco finally é sempre executado, mesmo se houver exceções
+    finally: # Este bloco 'finally' é executado sempre, mesmo se houver erros no run_polling
         # Fechar todas as conexões das exchanges quando o bot for encerrado
         logger.info("Fechando conexões das exchanges...")
         for exchange in global_exchanges_instances.values():
