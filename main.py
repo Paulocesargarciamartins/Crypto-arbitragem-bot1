@@ -29,13 +29,13 @@ PROFIT_CHANGE_ALERT_THRESHOLD_PERCENT = 0.5 # Ex: se o lucro mudar em 0.5% ou ma
 # antes de um alerta de cancelamento ser enviado.
 CANCELLATION_CONFIRM_SCANS = 2 # Ex: 2 varreduras (2 minutos com intervalo de 60s)
 
-# Exchanges confiáveis para monitorar (reduzida para as 10 mais estáveis e populares)
+# Exchanges confiáveis para monitorar
 EXCHANGES_LIST = [
     'binance', 'coinbase', 'kraken', 'okx', 'bybit',
     'kucoin', 'bitstamp', 'bitfinex', 'bitget', 'mexc'
 ]
 
-# Pares USDT (reduzido para os 60 pares mais relevantes para otimização de memória)
+# Pares USDT
 PAIRS = [
     "BTC/USDT", "ETH/USDT", "XRP/USDT", "USDT/USDT", "BNB/USDT", "SOL/USDT",
     "USDC/USDT", "STETH/USDT", "DOGE/USDT", "TRX/USDT", "ADA/USDT", "XLM/USDT",
@@ -57,6 +57,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 global_exchanges_instances = {}
+# Dicionário para rastrear se os mercados de uma exchange já foram carregados
+markets_loaded = {}
 
 async def fetch_all_market_data_for_pair(exchange_instances, pair):
     tasks = []
@@ -103,6 +105,7 @@ async def fetch_order_book_safe(exchange, pair, ex_id):
         logger.warning(f"Erro inesperado ao buscar {pair} em {ex_id}: {e}")
     return None
 
+# Função principal para checar arbitragem
 async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
     bot = context.bot
     job = context.job
@@ -110,6 +113,7 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
     chat_id = context.bot_data.get('admin_chat_id')
     if not chat_id:
         logger.warning("Nenhum chat_id de administrador configurado. Use /start para registrar.")
+        # Não retorna, para que a mensagem de start não se perca se o job rodar antes
         return
 
     try:
@@ -119,15 +123,35 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
 
         if 'active_opportunities' not in context.bot_data:
             context.bot_data['active_opportunities'] = {}
-
+        
         current_scan_opportunities = {}
 
         logger.info(f"Iniciando checagem de arbitragem. Lucro mínimo: {lucro_minimo_porcentagem}%, Volume de trade: {trade_amount_usd} USD")
 
-        exchanges_to_scan = {ex_id: instance for ex_id, instance in global_exchanges_instances.items()}
+        exchanges_to_scan = {}
+        for ex_id in EXCHANGES_LIST:
+            try:
+                if ex_id not in global_exchanges_instances:
+                    exchange_class = getattr(ccxt, ex_id)
+                    global_exchanges_instances[ex_id] = exchange_class({
+                        'enableRateLimit': True,
+                        'timeout': 3000,
+                    })
 
+                exchange = global_exchanges_instances[ex_id]
+                # Carrega os mercados apenas se ainda não foram carregados
+                if not markets_loaded.get(ex_id):
+                    await exchange.load_markets()
+                    markets_loaded[ex_id] = True
+                    logger.info(f"Mercados de {ex_id} carregados na primeira execução do job.")
+                
+                exchanges_to_scan[ex_id] = exchange
+            except Exception as e:
+                logger.error(f"ERRO: Não foi possível carregar ou inicializar a exchange {ex_id}: {e}")
+                
         if len(exchanges_to_scan) < 2:
             logger.error("Não há exchanges suficientes carregadas globalmente para verificar arbitragem.")
+            await bot.send_message(chat_id=chat_id, text="Erro: Não foi possível conectar a exchanges suficientes para checar arbitragem.")
             return
 
         for pair in PAIRS:
@@ -292,22 +316,20 @@ async def setfee(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def main():
     application = ApplicationBuilder().token(TOKEN).build()
 
-    logger.info("Carregando mercados das exchanges (isso pode levar alguns segundos)...")
+    logger.info("Inicializando exchanges...")
     for ex_id in EXCHANGES_LIST:
         try:
             exchange_class = getattr(ccxt, ex_id)
-            exchange = exchange_class({
+            global_exchanges_instances[ex_id] = exchange_class({
                 'enableRateLimit': True,
                 'timeout': 3000,
             })
-            await exchange.load_markets()
-            global_exchanges_instances[ex_id] = exchange
-            logger.info(f"Exchange {ex_id} carregada com sucesso.")
+            logger.info(f"Exchange {ex_id} inicializada.")
         except Exception as e:
-            logger.error(f"ERRO CRÍTICO: Não foi possível carregar a exchange {ex_id}. Ela será ignorada. Erro: {e}")
+            logger.error(f"ERRO CRÍTICO: Não foi possível inicializar a exchange {ex_id}. Ela será ignorada. Erro: {e}")
 
     if len(global_exchanges_instances) < 2:
-        logger.error("ERRO CRÍTICO: Menos de 2 exchanges foram carregadas com sucesso. O bot não pode operar.")
+        logger.error("ERRO CRÍTICO: Menos de 2 exchanges foram inicializadas com sucesso. O bot não pode operar.")
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("setlucro", setlucro))
