@@ -5,7 +5,6 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, JobQu
 import ccxt.async_support as ccxt
 import os
 import nest_asyncio
-from datetime import datetime
 
 # Aplica o patch para permitir loops aninhados,
 # corrigindo o problema no ambiente Heroku
@@ -231,12 +230,15 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
         if chat_id:
             await bot.send_message(chat_id=chat_id, text=f"Erro crítico na checagem de arbitragem: {e}")
     finally:
-        # Fechar todas as conexões das exchanges
+        # Correção: Adiciona tratamento de erro para RuntimeError ao fechar exchanges
+        # Isso evita que o bot trave se o loop de eventos já estiver fechando.
         for exchange in exchanges_instances.values():
             try:
                 await exchange.close()
+            except RuntimeError as e:
+                logger.warning(f"Erro ao fechar conexão da exchange {exchange.id} (RuntimeError): {e}. Pode ocorrer durante o desligamento do loop.")
             except Exception as e:
-                logger.error(f"Erro ao fechar conexão da exchange {exchange.id}: {e}")
+                logger.error(f"Erro inesperado ao fechar conexão da exchange {exchange.id}: {e}")
 
 # Comando /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
