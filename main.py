@@ -1,78 +1,115 @@
 import asyncio
-import aiohttp
-import telegram
-import time
-
-# Configuração do Telegram
-TOKEN = '7218062934:AAEcgNpqN3itPQ-GzotVtR_eQc7g9FynbzQ'
-CHAT_ID = '1093248456'
-bot = telegram.Bot(token=TOKEN)
-
-# Exchanges e pares
-exchanges = [
-    'binance', 'kucoin', 'coinbase', 'mexc', 'bitget', 'bitfinex', 'gate',
-    'kraken', 'bybit', 'okx', 'poloniex', 'bitmart', 'bitstamp', 'lbank'
-]
-
-symbols = [
-    'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT',
-    'ADA/USDT', 'AVAX/USDT', 'MATIC/USDT', 'DOT/USDT', 'TRX/USDT',
-    'UNI/USDT', 'LTC/USDT', 'ETC/USDT', 'FIL/USDT', 'NEAR/USDT',
-    'XLM/USDT', 'HBAR/USDT', 'ICP/USDT', 'SAND/USDT', 'APT/USDT',
-    'INJ/USDT', 'IMX/USDT', 'GRT/USDT', 'EGLD/USDT', 'AAVE/USDT',
-    'RNDR/USDT', 'FTM/USDT', 'RPL/USDT', 'QNT/USDT', 'KLAY/USDT',
-    'CRV/USDT', 'ZEC/USDT', 'ENJ/USDT', 'BAND/USDT', 'SNX/USDT',
-    'YFI/USDT', 'BAT/USDT', 'ANKR/USDT', '1INCH/USDT', 'COMP/USDT',
-    'SUSHI/USDT', 'STORJ/USDT', 'ZEN/USDT', 'CELR/USDT', 'CKB/USDT',
-    'OMG/USDT', 'WAVES/USDT', 'BAL/USDT', 'CVC/USDT', 'GALA/USDT',
-    'OP/USDT', 'AR/USDT', 'PEPE/USDT', 'JASMY/USDT', 'SHIB/USDT',
-    'ALGO/USDT', 'ZIL/USDT', 'SKL/USDT', 'FLOW/USDT', 'XEC/USDT',
-    'MASK/USDT', 'CHZ/USDT', 'DASH/USDT', 'PYR/USDT', 'VET/USDT',
-    'CRO/USDT', 'LRC/USDT', 'GLM/USDT', 'CTSI/USDT', 'MTL/USDT',
-    'NMR/USDT', 'KSM/USDT', 'RAY/USDT', 'SXP/USDT', 'KNC/USDT',
-    'UMA/USDT', 'AUDIO/USDT', 'DODO/USDT', 'REQ/USDT', 'COTI/USDT',
-    'TRB/USDT', 'BNT/USDT', 'C98/USDT', 'REEF/USDT', 'BADGER/USDT',
-    'ORN/USDT', 'TWT/USDT', 'SPELL/USDT', 'FET/USDT', 'ILV/USDT',
-    'LPT/USDT', 'GHST/USDT', 'PLA/USDT', 'TOMO/USDT', 'UOS/USDT',
-    'XNO/USDT', 'VRA/USDT', 'NKN/USDT', 'MDT/USDT', 'PERP/USDT'
-]
-
+import logging
+from telegram import Update, BotCommand
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import ccxt.async_support as ccxt
+import os
 
-async def fetch_price(exchange_id, symbol):
+# Configurações básicas
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")  # Configure no Heroku config vars
+LUCRO_MINIMO_PORCENTAGEM = 2.0  # Exemplo, pode ajustar e mandar via comando Telegram
+
+# Exchanges confiáveis para monitorar (20)
+EXCHANGES_LIST = [
+    'binance', 'coinbasepro', 'kraken', 'bitfinex', 'bittrex',
+    'huobipro', 'okex', 'bitstamp', 'gateio', 'kucoin',
+    'poloniex', 'ftx', 'bitmart', 'bybit', 'coinex',
+    'bitget', 'ascendex', 'bibox', 'bitflyer', 'digifinex'
+]
+
+# Pares USDT (exemplo curto, você pode ampliar)
+PAIRS = [
+    "BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "DOGE/USDT", "ADA/USDT", "LTC/USDT",
+    # ... até 100 pares (adicione conforme seu histórico)
+]
+
+logging.basicConfig(
+    format='[%(levelname)s] %(message)s',
+    level=logging.DEBUG
+)
+logger = logging.getLogger(__name__)
+
+# Função para checar arbitragem entre exchanges
+async def check_arbitrage(bot):
     try:
-        exchange = getattr(ccxt, exchange_id)()
-        ticker = await exchange.fetch_ticker(symbol)
-        await exchange.close()
-        return ticker['last']
-    except:
-        return None
+        exchanges = {}
+        for ex_id in EXCHANGES_LIST:
+            exchange = getattr(ccxt, ex_id)({
+                'enableRateLimit': True,
+            })
+            await exchange.load_markets()
+            exchanges[ex_id] = exchange
 
-async def check_arbitrage():
-    while True:
-        try:
-            for symbol in symbols:
-                prices = {}
-                for exchange_id in exchanges:
-                    price = await fetch_price(exchange_id, symbol)
-                    if price:
-                        prices[exchange_id] = price
+        for pair in PAIRS:
+            prices = {}
+            for ex_id, exchange in exchanges.items():
+                if pair in exchange.markets:
+                    ticker = await exchange.fetch_ticker(pair)
+                    prices[ex_id] = ticker['last']
+            if len(prices) < 2:
+                continue
 
-                if len(prices) >= 2:
-                    max_exchange = max(prices, key=prices.get)
-                    min_exchange = min(prices, key=prices.get)
-                    max_price = prices[max_exchange]
-                    min_price = prices[min_exchange]
-                    profit = (max_price - min_price) / min_price * 100
+            min_ex = min(prices, key=prices.get)
+            max_ex = max(prices, key=prices.get)
+            min_price = prices[min_ex]
+            max_price = prices[max_ex]
 
-                    if profit >= 2:  # Arbitragem com lucro acima de 2%
-                        msg = f"🔁 Arbitragem: {symbol}\n🔼 Comprar: {min_exchange} - ${min_price:.2f}\n🔽 Vender: {max_exchange} - ${max_price:.2f}\n📊 Lucro: {profit:.2f}%"
-                        await bot.send_message(chat_id=CHAT_ID, text=msg)
+            lucro = (max_price - min_price) / min_price * 100
 
-            await asyncio.sleep(60)
+            if lucro >= LUCRO_MINIMO_PORCENTAGEM:
+                msg = (f"🟢 Arbitragem encontrada para {pair}!\n"
+                       f"Comprar em {min_ex}: {min_price}\n"
+                       f"Vender em {max_ex}: {max_price}\n"
+                       f"Lucro estimado: {lucro:.2f}%")
+                logger.info(msg)
+                await bot.send_message(chat_id=os.getenv("TELEGRAM_CHAT_ID"), text=msg)
 
-        except Exception as e:
-            print(f"Erro: {e}")
-            await asyncio.sleep(60)
+        # Fechar exchanges para liberar recursos
+        for exchange in exchanges.values():
+            await exchange.close()
 
-asyncio.run(check_arbitrage())
+    except Exception as e:
+        logger.error(f"Erro na checagem de arbitragem: {e}")
+
+# Comando /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Olá! Bot de Arbitragem Ativado.\n"
+        "Use /setlucro <valor> para definir lucro mínimo em %.\n"
+        "Exemplo: /setlucro 3"
+    )
+
+# Comando /setlucro
+async def setlucro(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global LUCRO_MINIMO_PORCENTAGEM
+    try:
+        valor = float(context.args[0])
+        LUCRO_MINIMO_PORCENTAGEM = valor
+        await update.message.reply_text(f"Lucro mínimo atualizado para {valor}%")
+    except (IndexError, ValueError):
+        await update.message.reply_text("Uso incorreto. Exemplo: /setlucro 2.5")
+
+# Função principal do bot
+async def main():
+    application = ApplicationBuilder().token(TOKEN).build()
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("setlucro", setlucro))
+
+    # Agendar tarefa de arbitragem a cada 60 segundos
+    async def periodic_arbitrage_task(context: ContextTypes.DEFAULT_TYPE):
+        await check_arbitrage(application.bot)
+
+    application.job_queue.run_repeating(periodic_arbitrage_task, interval=60, first=5)
+
+    # Comandos oficiais (exibir no Telegram)
+    await application.bot.set_my_commands([
+        BotCommand("start", "Iniciar o bot"),
+        BotCommand("setlucro", "Definir lucro mínimo em %")
+    ])
+
+    logger.info("Bot iniciado com sucesso.")
+    await application.run_polling()
+
+if __name__ == "__main__":
+    asyncio.run(main())
