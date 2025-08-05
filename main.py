@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 async def check_arbitrage(bot):
     try:
         exchanges = {}
-        for ex_id in EXCHANGES_LIST:
+        for ex_id in EXCHANGes_LIST:
             exchange = getattr(ccxt, ex_id)({
                 'enableRateLimit': True,
             })
