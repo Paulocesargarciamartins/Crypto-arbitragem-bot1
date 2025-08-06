@@ -7,26 +7,20 @@ import os
 import nest_asyncio
 from datetime import datetime, timedelta
 
-# Aplica o patch para permitir loops aninhados,
-# corrigindo o problema no ambiente Heroku
 nest_asyncio.apply()
 
 # --- Configurações básicas ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-# Alterado o lucro mínimo padrão para um valor baixo de diagnóstico
 DEFAULT_LUCRO_MINIMO_PORCENTAGEM = 0.5 
-DEFAULT_TRADE_AMOUNT_USD = 50.0  # Quantidade de USD para verificar liquidez
+DEFAULT_TRADE_AMOUNT_USD = 50.0
 
-# Limite máximo de lucro bruto para validação de dados.
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0
 
-# Exchanges confiáveis para monitorar
 EXCHANGES_LIST = [
     'binance', 'coinbase', 'kraken', 'okx', 'bybit',
     'kucoin', 'bitstamp', 'bitfinex', 'bitget', 'mexc'
 ]
 
-# Pares USDT
 PAIRS = [
     "BTC/USDT", "ETH/USDT", "XRP/USDT", "USDT/USDT", "BNB/USDT", "SOL/USDT",
     "USDC/USDT", "STETH/USDT", "DOGE/USDT", "TRX/USDT", "ADA/USDT", "XLM/USDT",
@@ -40,7 +34,6 @@ PAIRS = [
     "MKR/USDT", "FIL/USDT", "OP/USDT", "IOTA/USDT"
 ]
 
-# Configuração de logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -48,7 +41,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 global_exchanges_instances = {}
-# Dicionário para rastrear se os mercados de uma exchange já foram carregados
 markets_loaded = {}
 
 async def fetch_all_market_data_for_pair(exchange_instances, pair):
@@ -96,7 +88,6 @@ async def fetch_order_book_safe(exchange, pair, ex_id):
         logger.warning(f"Erro inesperado ao buscar {pair} em {ex_id}: {e}")
     return None
 
-# --- FUNÇÃO DE ARBITRAGEM CORRIGIDA E OTIMIZADA (IGNORANDO TAXAS) ---
 async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
     bot = context.bot
     chat_id = context.bot_data.get('admin_chat_id')
@@ -105,11 +96,10 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        # A taxa de negociação é ignorada neste diagnóstico
         lucro_minimo = context.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)
         trade_amount_usd = context.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD)
 
-        logger.info(f"Iniciando checagem de arbitragem. Lucro MÍNIMO BRUTO: {lucro_minimo}%, Volume de trade: {trade_amount_usd} USD")
+        logger.info("Iniciando DIAGNÓSTICO de coleta de dados. Analisando pares.")
 
         exchanges_to_scan = {}
         for ex_id in EXCHANGES_LIST:
@@ -140,49 +130,37 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
             best_buy_price = float('inf')
             buy_ex_id = None
             buy_data = None
+
+            best_sell_price = 0
+            sell_ex_id = None
+            sell_data = None
+
             for ex_id, data in market_data.items():
                 if data['ask'] < best_buy_price:
                     best_buy_price = data['ask']
                     buy_ex_id = ex_id
                     buy_data = data
-            
-            best_sell_price = 0
-            sell_ex_id = None
-            sell_data = None
-            for ex_id, data in market_data.items():
+                
                 if data['bid'] > best_sell_price:
                     best_sell_price = data['bid']
                     sell_ex_id = ex_id
                     sell_data = data
+            
+            if best_buy_price != float('inf') and best_sell_price > 0 and buy_ex_id != sell_ex_id:
+                gross_profit = (best_sell_price - best_buy_price) / best_buy_price
+                gross_profit_percentage = gross_profit * 100
 
-            if not buy_ex_id or not sell_ex_id or buy_ex_id == sell_ex_id:
-                continue
+                # Loga o lucro bruto para diagnóstico, independentemente do valor.
+                logger.info(f"DIAGNÓSTICO: Par: {pair} | Lucro Bruto: {gross_profit_percentage:.2f}% | Compra em {buy_ex_id} por {best_buy_price:.8f} | Venda em {sell_ex_id} por {best_sell_price:.8f}")
 
-            gross_profit = (best_sell_price - best_buy_price) / best_buy_price
-            gross_profit_percentage = gross_profit * 100
-
-            if gross_profit_percentage > MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK:
-                logger.warning(f"Lucro bruto irrealista para {pair} ({gross_profit_percentage:.2f}%). Pulando.")
-                continue
-
-            # O filtro agora se baseia apenas no lucro bruto
-            if gross_profit_percentage >= lucro_minimo:
-                required_buy_volume = trade_amount_usd / best_buy_price
-                required_sell_volume = trade_amount_usd / best_sell_price
-
-                has_sufficient_liquidity = (
-                    buy_data['ask_volume'] >= required_buy_volume and
-                    sell_data['bid_volume'] >= required_sell_volume
-                )
-
-                if has_sufficient_liquidity:
-                    msg = (f"💰 Oportunidade de Arbitragem (Bruta) para {pair}!\n"
+                if gross_profit_percentage >= lucro_minimo:
+                    msg = (f"💰 Oportunidade Bruta para {pair}!\n"
                         f"Compre em {buy_ex_id}: {best_buy_price:.8f}\n"
                         f"Venda em {sell_ex_id}: {best_sell_price:.8f}\n"
                         f"Lucro Bruto: {gross_profit_percentage:.2f}%\n"
-                        f"Volume de Liquidez: ${trade_amount_usd:.2f}"
+                        f"Isso é uma oportunidade de diagnóstico, taxas e liquidez não foram checadas."
                     )
-                    logger.info(msg)
+                    logger.info(f"Oportunidade de diagnóstico encontrada e enviada para o chat.")
                     await bot.send_message(chat_id=chat_id, text=msg)
 
     except Exception as e:
@@ -198,20 +176,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.bot_data['admin_chat_id'] = update.message.chat_id
     await update.message.reply_text(
         "Olá! Bot de Arbitragem Ativado.\n"
-        "Monitorando oportunidades de arbitragem de criptomoedas.\n"
-        f"Lucro mínimo bruto atual: {context.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)}%\n"
-        f"Volume de trade para liquidez: ${context.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD):.2f}\n"
-        "OBS: As taxas de negociação estão sendo ignoradas para diagnóstico.\n\n"
+        "Este bot está em modo de diagnóstico. Ele vai reportar oportunidades de lucro bruto sem considerar taxas ou liquidez.\n"
+        f"Lucro mínimo bruto atual: {context.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)}%\n\n"
         "Use /setlucro <valor> para definir o lucro mínimo em %.\n"
-        "Exemplo: /setlucro 1\n\n"
-        "Use /setvolume <valor> para definir o volume de trade em USD para checagem de liquidez.\n"
-        "Exemplo: /setvolume 100\n\n"
         "Use /stop para parar de receber alertas."
     )
     logger.info(f"Bot iniciado por chat_id: {update.message.chat_id}")
 
-# As funções setvolume e stop_arbitrage permanecem inalteradas
-# A função setfee foi removida, já que as taxas são ignoradas.
 async def setlucro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         valor = float(context.args[0])
@@ -223,18 +194,6 @@ async def setlucro(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Lucro mínimo definido para {valor}% por {update.message.chat_id}")
     except (IndexError, ValueError):
         await update.message.reply_text("Uso incorreto. Exemplo: /setlucro 2.5")
-
-async def setvolume(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        valor = float(context.args[0])
-        if valor <= 0:
-            await update.message.reply_text("O volume de trade deve ser um valor positivo.")
-            return
-        context.bot_data['trade_amount_usd'] = valor
-        await update.message.reply_text(f"Volume de trade para checagem de liquidez atualizado para ${valor:.2f} USD")
-        logger.info(f"Volume de trade definido para ${valor} por {update.message.chat_id}")
-    except (IndexError, ValueError):
-        await update.message.reply_text("Uso incorreto. Exemplo: /setvolume 100")
 
 async def stop_arbitrage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     job_name = "check_arbitrage"
@@ -270,7 +229,6 @@ async def main():
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("setlucro", setlucro))
-    application.add_handler(CommandHandler("setvolume", setvolume))
     application.add_handler(CommandHandler("stop", stop_arbitrage))
 
     application.job_queue.run_repeating(check_arbitrage, interval=90, first=5, name="check_arbitrage")
@@ -278,7 +236,6 @@ async def main():
     await application.bot.set_my_commands([
         BotCommand("start", "Iniciar o bot e ver configurações"),
         BotCommand("setlucro", "Definir lucro mínimo bruto em % (Ex: /setlucro 2.5)"),
-        BotCommand("setvolume", "Definir volume de trade em USD para liquidez (Ex: /setvolume 100)"),
         BotCommand("stop", "Parar a checagem de arbitragem")
     ])
 
@@ -292,4 +249,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
