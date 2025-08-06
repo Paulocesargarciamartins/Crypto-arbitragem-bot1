@@ -13,9 +13,9 @@ nest_asyncio.apply()
 
 # --- Configurações básicas ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-DEFAULT_LUCRO_MINIMO_PORCENTAGEM = 2.0
+# Alterado o lucro mínimo padrão para um valor baixo de diagnóstico
+DEFAULT_LUCRO_MINIMO_PORCENTAGEM = 0.5 
 DEFAULT_TRADE_AMOUNT_USD = 50.0  # Quantidade de USD para verificar liquidez
-DEFAULT_FEE_PERCENTAGE = 0.1  # Taxa de negociação média por lado (0.1% é comum)
 
 # Limite máximo de lucro bruto para validação de dados.
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0
@@ -87,7 +87,7 @@ async def fetch_order_book_safe(exchange, pair, ex_id):
                     'timestamp': order_book.get('timestamp')
                 })
         else:
-            logger.debug(f"Livro de ofertas vazio ou inválido para {pair} em {ex_id}")
+            pass
     except ccxt.NetworkError as e:
         logger.warning(f"Erro de rede ao buscar {pair} em {ex_id}: {e}")
     except ccxt.ExchangeError as e:
@@ -96,7 +96,7 @@ async def fetch_order_book_safe(exchange, pair, ex_id):
         logger.warning(f"Erro inesperado ao buscar {pair} em {ex_id}: {e}")
     return None
 
-# --- FUNÇÃO DE ARBITRAGEM CORRIGIDA E OTIMIZADA ---
+# --- FUNÇÃO DE ARBITRAGEM CORRIGIDA E OTIMIZADA (IGNORANDO TAXAS) ---
 async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
     bot = context.bot
     chat_id = context.bot_data.get('admin_chat_id')
@@ -105,11 +105,11 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
+        # A taxa de negociação é ignorada neste diagnóstico
         lucro_minimo = context.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)
         trade_amount_usd = context.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD)
-        fee = context.bot_data.get('fee_percentage', DEFAULT_FEE_PERCENTAGE) / 100.0  # Convertendo para decimal
 
-        logger.info(f"Iniciando checagem de arbitragem. Lucro mínimo: {lucro_minimo}%, Volume de trade: {trade_amount_usd} USD")
+        logger.info(f"Iniciando checagem de arbitragem. Lucro MÍNIMO BRUTO: {lucro_minimo}%, Volume de trade: {trade_amount_usd} USD")
 
         exchanges_to_scan = {}
         for ex_id in EXCHANGES_LIST:
@@ -137,59 +137,50 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
             if len(market_data) < 2:
                 continue
 
-            # Encontra o melhor ASK (menor preço de compra) e a exchange correspondente
-            best_buy_opportunity = min(
-                (data for data in market_data.values() if data['ask'] > 0),
-                key=lambda x: x['ask'],
-                default=None
-            )
+            best_buy_price = float('inf')
+            buy_ex_id = None
+            buy_data = None
+            for ex_id, data in market_data.items():
+                if data['ask'] < best_buy_price:
+                    best_buy_price = data['ask']
+                    buy_ex_id = ex_id
+                    buy_data = data
             
-            # Encontra o melhor BID (maior preço de venda) e a exchange correspondente
-            best_sell_opportunity = max(
-                (data for data in market_data.values() if data['bid'] > 0),
-                key=lambda x: x['bid'],
-                default=None
-            )
+            best_sell_price = 0
+            sell_ex_id = None
+            sell_data = None
+            for ex_id, data in market_data.items():
+                if data['bid'] > best_sell_price:
+                    best_sell_price = data['bid']
+                    sell_ex_id = ex_id
+                    sell_data = data
 
-            if not best_buy_opportunity or not best_sell_opportunity:
+            if not buy_ex_id or not sell_ex_id or buy_ex_id == sell_ex_id:
                 continue
 
-            buy_ex_id = [k for k, v in market_data.items() if v == best_buy_opportunity][0]
-            sell_ex_id = [k for k, v in market_data.items() if v == best_sell_opportunity][0]
-
-            # Garante que não é a mesma exchange para compra e venda
-            if buy_ex_id == sell_ex_id:
-                continue
-
-            min_ask_price = best_buy_opportunity['ask']
-            max_bid_price = best_sell_opportunity['bid']
-
-            # Inicia a checagem de arbitragem
-            gross_profit = (max_bid_price - min_ask_price) / min_ask_price
+            gross_profit = (best_sell_price - best_buy_price) / best_buy_price
             gross_profit_percentage = gross_profit * 100
 
             if gross_profit_percentage > MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK:
                 logger.warning(f"Lucro bruto irrealista para {pair} ({gross_profit_percentage:.2f}%). Pulando.")
                 continue
 
-            # Cálculo de lucro líquido
-            net_profit_percentage = gross_profit_percentage - (2 * fee * 100)
-            
-            if net_profit_percentage >= lucro_minimo:
-                required_buy_volume = trade_amount_usd / min_ask_price
-                required_sell_volume = trade_amount_usd / max_bid_price
+            # O filtro agora se baseia apenas no lucro bruto
+            if gross_profit_percentage >= lucro_minimo:
+                required_buy_volume = trade_amount_usd / best_buy_price
+                required_sell_volume = trade_amount_usd / best_sell_price
 
                 has_sufficient_liquidity = (
-                    best_buy_opportunity['ask_volume'] >= required_buy_volume and
-                    best_sell_opportunity['bid_volume'] >= required_sell_volume
+                    buy_data['ask_volume'] >= required_buy_volume and
+                    sell_data['bid_volume'] >= required_sell_volume
                 )
 
                 if has_sufficient_liquidity:
-                    msg = (f"💰 Arbitragem para {pair}!\n"
-                        f"Compre em {buy_ex_id}: {min_ask_price:.8f}\n"
-                        f"Venda em {sell_ex_id}: {max_bid_price:.8f}\n"
-                        f"Lucro Líquido: {net_profit_percentage:.2f}%\n"
-                        f"Volume: ${trade_amount_usd:.2f}"
+                    msg = (f"💰 Oportunidade de Arbitragem (Bruta) para {pair}!\n"
+                        f"Compre em {buy_ex_id}: {best_buy_price:.8f}\n"
+                        f"Venda em {sell_ex_id}: {best_sell_price:.8f}\n"
+                        f"Lucro Bruto: {gross_profit_percentage:.2f}%\n"
+                        f"Volume de Liquidez: ${trade_amount_usd:.2f}"
                     )
                     logger.info(msg)
                     await bot.send_message(chat_id=chat_id, text=msg)
@@ -208,19 +199,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Olá! Bot de Arbitragem Ativado.\n"
         "Monitorando oportunidades de arbitragem de criptomoedas.\n"
-        f"Lucro mínimo atual: {context.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)}%\n"
+        f"Lucro mínimo bruto atual: {context.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)}%\n"
         f"Volume de trade para liquidez: ${context.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD):.2f}\n"
-        f"Taxa de negociação por lado: {context.bot_data.get('fee_percentage', DEFAULT_FEE_PERCENTAGE)}%\n\n"
+        "OBS: As taxas de negociação estão sendo ignoradas para diagnóstico.\n\n"
         "Use /setlucro <valor> para definir o lucro mínimo em %.\n"
-        "Exemplo: /setlucro 3\n\n"
+        "Exemplo: /setlucro 1\n\n"
         "Use /setvolume <valor> para definir o volume de trade em USD para checagem de liquidez.\n"
         "Exemplo: /setvolume 100\n\n"
-        "Use /setfee <valor> para definir a taxa de negociação por lado em %.\n"
-        "Exemplo: /setfee 0.075\n\n"
         "Use /stop para parar de receber alertas."
     )
     logger.info(f"Bot iniciado por chat_id: {update.message.chat_id}")
 
+# As funções setvolume e stop_arbitrage permanecem inalteradas
+# A função setfee foi removida, já que as taxas são ignoradas.
 async def setlucro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         valor = float(context.args[0])
@@ -228,7 +219,7 @@ async def setlucro(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("O lucro mínimo não pode ser negativo.")
             return
         context.bot_data['lucro_minimo_porcentagem'] = valor
-        await update.message.reply_text(f"Lucro mínimo atualizado para {valor:.2f}%")
+        await update.message.reply_text(f"Lucro mínimo (bruto) atualizado para {valor:.2f}%")
         logger.info(f"Lucro mínimo definido para {valor}% por {update.message.chat_id}")
     except (IndexError, ValueError):
         await update.message.reply_text("Uso incorreto. Exemplo: /setlucro 2.5")
@@ -244,18 +235,6 @@ async def setvolume(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Volume de trade definido para ${valor} por {update.message.chat_id}")
     except (IndexError, ValueError):
         await update.message.reply_text("Uso incorreto. Exemplo: /setvolume 100")
-
-async def setfee(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        valor = float(context.args[0])
-        if valor < 0:
-            await update.message.reply_text("A taxa de negociação não pode ser negativa.")
-            return
-        context.bot_data['fee_percentage'] = valor
-        await update.message.reply_text(f"Taxa de negociação por lado atualizada para {valor:.3f}%")
-        logger.info(f"Taxa de negociação definida para {valor}% por {update.message.chat_id}")
-    except (IndexError, ValueError):
-        await update.message.reply_text("Uso incorreto. Exemplo: /setfee 0.075")
 
 async def stop_arbitrage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     job_name = "check_arbitrage"
@@ -292,16 +271,14 @@ async def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("setlucro", setlucro))
     application.add_handler(CommandHandler("setvolume", setvolume))
-    application.add_handler(CommandHandler("setfee", setfee))
     application.add_handler(CommandHandler("stop", stop_arbitrage))
 
     application.job_queue.run_repeating(check_arbitrage, interval=90, first=5, name="check_arbitrage")
 
     await application.bot.set_my_commands([
         BotCommand("start", "Iniciar o bot e ver configurações"),
-        BotCommand("setlucro", "Definir lucro mínimo em % (Ex: /setlucro 2.5)"),
+        BotCommand("setlucro", "Definir lucro mínimo bruto em % (Ex: /setlucro 2.5)"),
         BotCommand("setvolume", "Definir volume de trade em USD para liquidez (Ex: /setvolume 100)"),
-        BotCommand("setfee", "Definir taxa de negociação por lado em % (Ex: /setfee 0.075)"),
         BotCommand("stop", "Parar a checagem de arbitragem")
     ])
 
@@ -315,3 +292,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
