@@ -48,8 +48,9 @@ global_exchanges_instances = {}
 GLOBAL_MARKET_DATA = {pair: {} for pair in PAIRS}
 markets_loaded = {}
 
+# --- NOVAS VARIÁVEIS PARA COOLDOWN ---
 last_alert_time = {}
-ALERT_COOLDOWN = 60
+ALERT_COOLDOWN = 60  # Tempo em segundos para esperar antes de enviar um novo alerta para o mesmo par.
 
 async def handle_websocket_data(context: ContextTypes.DEFAULT_TYPE):
     bot = context.bot
@@ -67,6 +68,7 @@ async def handle_websocket_data(context: ContextTypes.DEFAULT_TYPE):
             if len(market_data) < 2:
                 continue
 
+            # --- NOVA LÓGICA DE COOLDOWN ---
             now = asyncio.get_event_loop().time()
             if pair in last_alert_time and now - last_alert_time[pair] < ALERT_COOLDOWN:
                 continue
@@ -122,8 +124,7 @@ async def handle_websocket_data(context: ContextTypes.DEFAULT_TYPE):
                     )
                     logger.info(msg)
                     await bot.send_message(chat_id=chat_id, text=msg)
-                    last_alert_time[pair] = now
-
+                    last_alert_time[pair] = now  # Atualiza o tempo do último alerta
     except Exception as e:
         logger.error(f"Erro na checagem de arbitragem por WebSocket: {e}", exc_info=True)
 
