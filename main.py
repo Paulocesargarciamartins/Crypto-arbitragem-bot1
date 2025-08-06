@@ -20,15 +20,6 @@ DEFAULT_FEE_PERCENTAGE = 0.1 # Taxa de negociação média por lado (0.1% é com
 # Limite máximo de lucro bruto para validação de dados.
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0
 
-# Período de cooldown para evitar alertas repetidos para a mesma oportunidade (em segundos).
-COOLDOWN_PERIOD_FOR_ALERTS = 300 # 5 minutos
-# Porcentagem de mudança no lucro líquido para re-alertar uma oportunidade existente antes do cooldown expirar
-PROFIT_CHANGE_ALERT_THRESHOLD_PERCENT = 0.5 # Ex: se o lucro mudar em 0.5% ou mais, alerta novamente
-
-# Número de varreduras consecutivas que uma oportunidade deve estar ausente
-# antes de um alerta de cancelamento ser enviado.
-CANCELLATION_CONFIRM_SCANS = 2 # Ex: 2 varreduras (2 minutos com intervalo de 60s)
-
 # Exchanges confiáveis para monitorar
 EXCHANGES_LIST = [
     'binance', 'coinbase', 'kraken', 'okx', 'bybit',
@@ -52,7 +43,7 @@ PAIRS = [
 # Configuração de logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO 
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
@@ -113,16 +104,12 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
     chat_id = context.bot_data.get('admin_chat_id')
     if not chat_id:
         logger.warning("Nenhum chat_id de administrador configurado. Use /start para registrar.")
-        # Não retorna, para que a mensagem de start não se perca se o job rodar antes
         return
 
     try:
         lucro_minimo_porcentagem = context.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)
         trade_amount_usd = context.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD)
         fee_percentage = context.bot_data.get('fee_percentage', DEFAULT_FEE_PERCENTAGE)
-
-        if 'active_opportunities' not in context.bot_data:
-            context.bot_data['active_opportunities'] = {}
         
         current_scan_opportunities = {}
 
@@ -197,61 +184,20 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
                                 'net_profit': net_profit_percentage,
                                 'volume': trade_amount_usd
                             }
-
-        opportunities_to_remove_from_active = []
-        for key, opp_data in context.bot_data['active_opportunities'].items():
-            if key not in current_scan_opportunities:
-                opp_data['missed_scans'] = opp_data.get('missed_scans', 0) + 1
-                if opp_data['missed_scans'] >= CANCELLATION_CONFIRM_SCANS:
-                    pair, buy_ex, sell_ex = key
-                    msg = (f"❌ Oportunidade para {pair} (CANCELADA)!\n"
-                        f"Anteriormente: Compre em {buy_ex}: {opp_data['buy_price']:.8f}, Venda em {sell_ex}: {opp_data['sell_price']:.8f}\n"
-                        f"Lucro Líquido Anterior: {opp_data['net_profit']:.2f}%\n"
-                        f"Volume: ${opp_data['volume']:.2f}"
-                    )
-                    logger.info(msg)
-                    await bot.send_message(chat_id=chat_id, text=msg)
-                    opportunities_to_remove_from_active.append(key)
-            else:
-                opp_data['missed_scans'] = 0
-
-        for key in opportunities_to_remove_from_active:
-            del context.bot_data['active_opportunities'][key]
-
+        
+        # A nova lógica de alerta simplificada
         for key, current_opp_data in current_scan_opportunities.items():
             pair, buy_ex, sell_ex = key
-            last_opp_data = context.bot_data['active_opportunities'].get(key)
             current_time_dt = datetime.now()
-
-            should_alert = False
-            if last_opp_data is None:
-                should_alert = True
-            else:
-                profit_diff = abs(current_opp_data['net_profit'] - last_opp_data['net_profit'])
-                time_since_last_alert = (current_time_dt - last_opp_data['last_alert_time']).total_seconds()
-
-                if profit_diff >= PROFIT_CHANGE_ALERT_THRESHOLD_PERCENT:
-                    should_alert = True
-                elif time_since_last_alert >= COOLDOWN_PERIOD_FOR_ALERTS:
-                    should_alert = True
-
-            if should_alert:
-                msg = (f"💰 Arbitragem para {pair} ({current_time_dt.strftime('%H:%M:%S')})!\n"
-                    f"Compre em {buy_ex}: {current_opp_data['buy_price']:.8f}\n"
-                    f"Venda em {sell_ex}: {current_opp_data['sell_price']:.8f}\n"
-                    f"Lucro Líquido: {current_opp_data['net_profit']:.2f}%\n"
-                    f"Volume: ${current_opp_data['volume']:.2f}"
-                )
-                logger.info(msg)
-                await bot.send_message(chat_id=chat_id, text=msg)
-                context.bot_data['active_opportunities'][key] = {
-                    'buy_price': current_opp_data['buy_price'],
-                    'sell_price': current_opp_data['sell_price'],
-                    'net_profit': current_opp_data['net_profit'],
-                    'volume': current_opp_data['volume'],
-                    'last_alert_time': current_time_dt,
-                    'missed_scans': 0
-                }
+            
+            msg = (f"💰 Arbitragem para {pair} ({current_time_dt.strftime('%H:%M:%S')})!\n"
+                f"Compre em {buy_ex}: {current_opp_data['buy_price']:.8f}\n"
+                f"Venda em {sell_ex}: {current_opp_data['sell_price']:.8f}\n"
+                f"Lucro Líquido: {current_opp_data['net_profit']:.2f}%\n"
+                f"Volume: ${current_opp_data['volume']:.2f}"
+            )
+            logger.info(msg)
+            await bot.send_message(chat_id=chat_id, text=msg)
 
     except Exception as e:
         logger.error(f"Erro geral na checagem de arbitragem: {e}", exc_info=True)
@@ -273,7 +219,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Use /setvolume <valor> para definir o volume de trade em USD para checagem de liquidez.\n"
         "Exemplo: /setvolume 100\n\n"
         "Use /setfee <valor> para definir a taxa de negociação por lado em %.\n"
-        "Exemplo: /setfee 0.075"
+        "Exemplo: /setfee 0.075\n\n"
+        "Use /stop para parar de receber alertas."
     )
     logger.info(f"Bot iniciado por chat_id: {update.message.chat_id}")
 
@@ -313,6 +260,20 @@ async def setfee(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except (IndexError, ValueError):
         await update.message.reply_text("Uso incorreto. Exemplo: /setfee 0.075")
 
+async def stop_arbitrage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    job_name = "check_arbitrage"
+    current_jobs = context.job_queue.get_jobs_by_name(job_name)
+    if not current_jobs:
+        await update.message.reply_text("A checagem de arbitragem já está parada.")
+        return
+
+    for job in current_jobs:
+        job.schedule_removal()
+    
+    await update.message.reply_text("Checagem de arbitragem parada. Você não receberá mais alertas.")
+    logger.info(f"Checagem de arbitragem parada por {update.message.chat_id}")
+
+
 async def main():
     application = ApplicationBuilder().token(TOKEN).build()
 
@@ -335,14 +296,16 @@ async def main():
     application.add_handler(CommandHandler("setlucro", setlucro))
     application.add_handler(CommandHandler("setvolume", setvolume))
     application.add_handler(CommandHandler("setfee", setfee))
+    application.add_handler(CommandHandler("stop", stop_arbitrage))
 
-    application.job_queue.run_repeating(check_arbitrage, interval=60, first=5)
+    application.job_queue.run_repeating(check_arbitrage, interval=60, first=5, name="check_arbitrage")
 
     await application.bot.set_my_commands([
         BotCommand("start", "Iniciar o bot e ver configurações"),
         BotCommand("setlucro", "Definir lucro mínimo em % (Ex: /setlucro 2.5)"),
         BotCommand("setvolume", "Definir volume de trade em USD para liquidez (Ex: /setvolume 100)"),
-        BotCommand("setfee", "Definir taxa de negociação por lado em % (Ex: /setfee 0.075)")
+        BotCommand("setfee", "Definir taxa de negociação por lado em % (Ex: /setfee 0.075)"),
+        BotCommand("stop", "Parar a checagem de arbitragem")
     ])
 
     logger.info("Bot iniciado com sucesso e aguardando mensagens...")
