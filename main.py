@@ -265,7 +265,6 @@ async def main():
     tasks_to_run = [
         watch_all_exchanges(application),
         check_arbitrage_opportunities(application),
-        application.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False),
     ]
 
     application.add_handler(CommandHandler("start", start))
@@ -283,8 +282,11 @@ async def main():
     ])
 
     logger.info("Bot iniciado com sucesso e aguardando mensagens...")
+
     try:
-        await asyncio.gather(*tasks_to_run)
+        # Agora estamos garantindo que a tarefa de polling do Telegram e as outras tarefas
+        # de checagem e WebSocket rodem juntas de forma assíncrona.
+        await asyncio.gather(application.run_polling(), *tasks_to_run)
     except Exception as e:
         logger.error(f"Erro no loop principal do bot: {e}", exc_info=True)
     finally:
