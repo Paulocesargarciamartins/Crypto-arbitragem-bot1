@@ -18,10 +18,10 @@ DEFAULT_FEE_PERCENTAGE = 0.1
 # Limite máximo de lucro bruto para validação de dados.
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0
 
-# Exchanges confiáveis para monitorar
+# Exchanges confiáveis para monitorar (BITFINEX REMOVIDA)
 EXCHANGES_LIST = [
     'binance', 'coinbase', 'kraken', 'okx', 'bybit',
-    'kucoin', 'bitstamp', 'bitfinex', 'bitget', 'mexc'
+    'kucoin', 'bitstamp', 'bitget', 'mexc'
 ]
 
 # Pares USDT - ATUALIZADA com as 60 principais moedas por capitalização de mercado
@@ -106,9 +106,13 @@ async def handle_websocket_data(context: ContextTypes.DEFAULT_TYPE):
                 required_buy_volume = trade_amount_usd / best_buy_price
                 required_sell_volume = trade_amount_usd / best_sell_price
 
+                # Verificação de liquidez aprimorada para evitar volumes nulos
+                buy_volume = buy_data.get('ask_volume', 0) if buy_data.get('ask_volume') is not None else 0
+                sell_volume = sell_data.get('bid_volume', 0) if sell_data.get('bid_volume') is not None else 0
+
                 has_sufficient_liquidity = (
-                    buy_data.get('ask_volume', 0) >= required_buy_volume and
-                    sell_data.get('bid_volume', 0) >= required_sell_volume
+                    buy_volume >= required_buy_volume and
+                    sell_volume >= required_sell_volume
                 )
 
                 if has_sufficient_liquidity:
@@ -136,6 +140,7 @@ async def watch_order_book_for_pair(exchange, pair, ex_id, context):
             best_ask = order_book['asks'][0][0] if order_book['asks'] else float('inf')
             best_ask_volume = order_book['asks'][0][1] if order_book['asks'] else 0
 
+            # Atualiza os dados globais
             GLOBAL_MARKET_DATA[pair][ex_id] = {
                 'bid': best_bid,
                 'bid_volume': best_bid_volume,
@@ -244,7 +249,6 @@ async def stop_arbitrage(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def main():
     application = ApplicationBuilder().token(TOKEN).build()
     
-    # Roda a função de monitoramento de WebSockets em segundo plano antes de iniciar o polling do bot.
     asyncio.create_task(watch_all_exchanges(application))
 
     application.add_handler(CommandHandler("start", start))
