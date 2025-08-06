@@ -48,36 +48,29 @@ global_exchanges_instances = {}
 GLOBAL_MARKET_DATA = {pair: {} for pair in PAIRS}
 markets_loaded = {}
 
-# --- VARIÁVEIS PARA COOLDOWN ---
-last_alert_time = {}
-ALERT_COOLDOWN = 60  # Tempo em segundos para esperar antes de enviar um novo alerta para o mesmo par.
 
-async def check_arbitrage_opportunities(context: ContextTypes.DEFAULT_TYPE):
+async def check_arbitrage_opportunities(application):
     """
-    Função principal que verifica oportunidades de arbitragem e envia alertas.
+    Função que checa oportunidades de arbitragem em loop.
     """
-    bot = context.bot
-    chat_id = context.bot_data.get('admin_chat_id')
-    if not chat_id:
-        logger.warning("Nenhum chat_id de administrador definido. O bot não enviará alertas.")
-        return
-
+    bot = application.bot
     while True:
         try:
+            chat_id = application.bot_data.get('admin_chat_id')
+            if not chat_id:
+                logger.warning("Nenhum chat_id de administrador definido. O bot não enviará alertas.")
+                await asyncio.sleep(5)
+                continue
+
             logger.info("Executando checagem de arbitragem...")
 
-            lucro_minimo = context.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)
-            trade_amount_usd = context.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD)
-            fee = context.bot_data.get('fee_percentage', DEFAULT_FEE_PERCENTAGE) / 100.0
+            lucro_minimo = application.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)
+            trade_amount_usd = application.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD)
+            fee = application.bot_data.get('fee_percentage', DEFAULT_FEE_PERCENTAGE) / 100.0
 
             for pair in PAIRS:
                 market_data = GLOBAL_MARKET_DATA[pair]
                 if len(market_data) < 2:
-                    continue
-
-                # Lógica de cooldown: verifica se já passou o tempo mínimo para o próximo alerta.
-                now = asyncio.get_event_loop().time()
-                if pair in last_alert_time and now - last_alert_time[pair] < ALERT_COOLDOWN:
                     continue
 
                 best_buy_price = float('inf')
@@ -131,7 +124,6 @@ async def check_arbitrage_opportunities(context: ContextTypes.DEFAULT_TYPE):
                         )
                         logger.info(msg)
                         await bot.send_message(chat_id=chat_id, text=msg)
-                        last_alert_time[pair] = now
                 else:
                     logger.debug(f"Oportunidade para {pair}: Lucro Líquido {net_profit_percentage:.2f}% (abaixo do mínimo de {lucro_minimo:.2f}%)")
 
@@ -170,7 +162,7 @@ async def watch_order_book_for_pair(exchange, pair, ex_id):
         await exchange.close()
 
 
-async def watch_all_exchanges(application):
+async def watch_all_exchanges():
     tasks = []
     for ex_id in EXCHANGES_LIST:
         exchange_class = getattr(ccxt, ex_id)
@@ -258,17 +250,8 @@ async def stop_arbitrage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Alertas desativados. Use /start para reativar.")
     logger.info(f"Alertas de arbitragem desativados por {update.message.chat_id}")
 
-
-async def post_init(application: ApplicationBuilder):
-    """Função executada após a inicialização do Application, mas antes do polling."""
-    # Criamos as tarefas de background aqui e as adicionamos como tarefas do loop de eventos.
-    # Elas rodarão em paralelo com o polling do Telegram.
-    asyncio.create_task(watch_all_exchanges(application))
-    asyncio.create_task(check_arbitrage_opportunities(application))
-
-
 async def main():
-    application = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
+    application = ApplicationBuilder().token(TOKEN).build()
     
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("setlucro", setlucro))
@@ -287,6 +270,12 @@ async def main():
     logger.info("Bot iniciado com sucesso e aguardando mensagens...")
 
     try:
+        # A nova abordagem para rodar tarefas em background.
+        # Criamos as tarefas e agendamos para rodar, permitindo que o polling do Telegram
+        # aconteça no loop principal.
+        asyncio.create_task(watch_all_exchanges())
+        asyncio.create_task(check_arbitrage_opportunities(application))
+        
         await application.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
 
     except Exception as e:
