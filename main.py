@@ -24,18 +24,18 @@ EXCHANGES_LIST = [
     'kucoin', 'bitstamp', 'bitfinex', 'bitget', 'mexc'
 ]
 
-# Pares USDT
+# Pares USDT - ATUALIZADA com as 60 principais moedas por capitalização de mercado
 PAIRS = [
     "BTC/USDT", "ETH/USDT", "XRP/USDT", "USDT/USDT", "BNB/USDT", "SOL/USDT",
-    "USDC/USDT", "STETH/USDT", "DOGE/USDT", "TRX/USDT", "ADA/USDT", "XLM/USDT",
-    "BCH/USDT", "SUI/USDT", "LINK/USDT", "HBAR/USDT", "AVAX/USDT", "LTC/USDT",
-    "SHIB/USDT", "UNI/USDT", "XMR/USDT", "DOT/USDT", "PEPE/USDT", "AAVE/USDT",
-    "CRO/USDT", "DAI/USDT", "ETC/USDT", "ONDO/USDT", "NEAR/USDT", "OKB/USDT",
-    "APT/USDT", "ICP/USDT", "ALGO/USDT", "ATOM/USDT", "WBTC/USDT", "TON/USDT",
-    "USDS/USDT", "ENA/USDT", "TAO/USDT", "MNT/USDT", "JITOSOL/USDT", "KAS/USDT",
-    "PENGU/USDT", "ARB/USDT", "BONK/USDT", "RENDER/USDT", "POL/USDT", "WLD/USDT",
-    "STORY/USDT", "TRUMP/USDT", "SEI/USDT", "SKY/USDT", "HYPE/USDT", "WBETH/USDT",
-    "MKR/USDT", "FIL/USDT", "OP/USDT", "IOTA/USDT"
+    "USDC/USDT", "TRX/USDT", "DOGE/USDT", "ADA/USDT", "WBTC/USDT", "STETH/USDT",
+    "XLM/USDT", "SUI/USDT", "BCH/USDT", "LINK/USDT", "HBAR/USDT", "AVAX/USDT",
+    "LTC/USDT", "USDS/USDT", "TON/USDT", "SHIB/USDT", "UNI/USDT", "DOT/USDT",
+    "XMR/USDT", "CRO/USDT", "PEPE/USDT", "AAVE/USDT", "ENA/USDT", "DAI/USDT",
+    "TAO/USDT", "NEAR/USDT", "ETC/USDT", "MNT/USDT", "ONDO/USDT", "APT/USDT",
+    "ICP/USDT", "JITOSOL/USDT", "KAS/USDT", "PENGU/USDT", "ALGO/USDT", "ARB/USDT",
+    "POL/USDT", "ATOM/USDT", "BONK/USDT", "WBETH/USDT", "RENDER/USDT", "WLD/USDT",
+    "STORY/USDT", "TRUMP/USDT", "SEI/USDT", "SKY/USDT", "HYPE/USDT", "MKR/USDT",
+    "FIL/USDT", "OP/USDT", "IOTA/USDT", "INJ/USDT", "FET/USDT", "GRT/USDT"
 ]
 
 # Configuração de logging
@@ -47,16 +47,12 @@ logger = logging.getLogger(__name__)
 
 global_exchanges_instances = {}
 GLOBAL_MARKET_DATA = {pair: {} for pair in PAIRS}
+markets_loaded = {}
 
-# Dicionário para rastrear se o bot já enviou uma notificação para uma oportunidade recente
 last_alert_time = {}
-ALERT_COOLDOWN = 60 # Cooldown de 60 segundos por par para evitar spam
+ALERT_COOLDOWN = 60
 
 async def handle_websocket_data(context: ContextTypes.DEFAULT_TYPE):
-    """
-    Função de arbitragem ativada por evento de WebSocket.
-    Ela checa as oportunidades de arbitragem usando os dados mais recentes.
-    """
     bot = context.bot
     chat_id = context.bot_data.get('admin_chat_id')
     if not chat_id:
@@ -72,7 +68,6 @@ async def handle_websocket_data(context: ContextTypes.DEFAULT_TYPE):
             if len(market_data) < 2:
                 continue
 
-            # Checa o cooldown de alerta
             now = asyncio.get_event_loop().time()
             if pair in last_alert_time and now - last_alert_time[pair] < ALERT_COOLDOWN:
                 continue
@@ -132,9 +127,6 @@ async def handle_websocket_data(context: ContextTypes.DEFAULT_TYPE):
 
 
 async def watch_order_book_for_pair(exchange, pair, ex_id, context):
-    """
-    Conecta e monitora o livro de ofertas de um par em uma exchange.
-    """
     try:
         while True:
             order_book = await exchange.watch_order_book(pair)
@@ -144,14 +136,12 @@ async def watch_order_book_for_pair(exchange, pair, ex_id, context):
             best_ask = order_book['asks'][0][0] if order_book['asks'] else float('inf')
             best_ask_volume = order_book['asks'][0][1] if order_book['asks'] else 0
 
-            # Atualiza os dados globais
             GLOBAL_MARKET_DATA[pair][ex_id] = {
                 'bid': best_bid,
                 'bid_volume': best_bid_volume,
                 'ask': best_ask,
                 'ask_volume': best_ask_volume
             }
-            # Chama a função de arbitragem a cada atualização
             await handle_websocket_data(context)
 
     except ccxt.NetworkError as e:
@@ -165,25 +155,32 @@ async def watch_order_book_for_pair(exchange, pair, ex_id, context):
 
 
 async def watch_all_exchanges(context: ContextTypes.DEFAULT_TYPE):
-    """
-    Mantém conexões WebSocket para todas as exchanges e pares.
-    """
-    
     tasks = []
     for ex_id in EXCHANGES_LIST:
         exchange_class = getattr(ccxt, ex_id)
-        global_exchanges_instances[ex_id] = exchange_class({
+        exchange = exchange_class({
             'enableRateLimit': True,
             'timeout': 3000,
         })
-        exchange = global_exchanges_instances[ex_id]
+        global_exchanges_instances[ex_id] = exchange
+        
+        try:
+            logger.info(f"Carregando mercados para {ex_id}...")
+            await exchange.load_markets()
+            markets_loaded[ex_id] = True
+            logger.info(f"Mercados de {ex_id} carregados. Total de pares: {len(exchange.markets)}")
 
-        for pair in PAIRS:
-            tasks.append(asyncio.create_task(
-                watch_order_book_for_pair(exchange, pair, ex_id, context)
-            ))
+            for pair in PAIRS:
+                if pair in exchange.markets:
+                    tasks.append(asyncio.create_task(
+                        watch_order_book_for_pair(exchange, pair, ex_id, context)
+                    ))
+                else:
+                    logger.warning(f"Par {pair} não está disponível em {ex_id}. Ignorando...")
+        except Exception as e:
+            logger.error(f"ERRO ao carregar mercados de {ex_id}: {e}")
     
-    logger.info("Iniciando WebSockets para todas as exchanges e pares...")
+    logger.info("Iniciando WebSockets para todas as exchanges e pares válidos...")
     await asyncio.gather(*tasks, return_exceptions=True)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -241,18 +238,13 @@ async def setfee(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Uso incorreto. Exemplo: /setfee 0.075")
 
 async def stop_arbitrage(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # A lógica de parar a arbitragem com WebSockets é mais complexa,
-    # por isso, manteremos o bot rodando e apenas paramos os alertas
-    # com o comando /stop.
-    # TODO: Implementar lógica de parar os WebSockets
     await update.message.reply_text("Modo WebSocket: O bot continuará a checar, mas não enviará mais alertas. Reinicie o bot para voltar a receber alertas.")
     logger.info(f"Alertas de arbitragem desativados por {update.message.chat_id}")
 
 async def main():
     application = ApplicationBuilder().token(TOKEN).build()
-
-    logger.info("Inicializando WebSockets para todas as exchanges...")
-    # Roda a função de monitoramento de WebSockets em segundo plano
+    
+    # Roda a função de monitoramento de WebSockets em segundo plano antes de iniciar o polling do bot.
     asyncio.create_task(watch_all_exchanges(application))
 
     application.add_handler(CommandHandler("start", start))
