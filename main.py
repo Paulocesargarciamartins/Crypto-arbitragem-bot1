@@ -24,7 +24,7 @@ EXCHANGES_LIST = [
     'kucoin', 'bitstamp', 'bitget', 'mexc'
 ]
 
-# Pares USDT - ATUALIZADA com as 60 principais moedas por capitalização de mercado
+# Pares USDT - OTIMIZADA para o plano Eco Dynos (50 principais moedas)
 PAIRS = [
     "BTC/USDT", "ETH/USDT", "XRP/USDT", "USDT/USDT", "BNB/USDT", "SOL/USDT",
     "USDC/USDT", "TRX/USDT", "DOGE/USDT", "ADA/USDT", "WBTC/USDT", "STETH/USDT",
@@ -34,8 +34,7 @@ PAIRS = [
     "TAO/USDT", "NEAR/USDT", "ETC/USDT", "MNT/USDT", "ONDO/USDT", "APT/USDT",
     "ICP/USDT", "JITOSOL/USDT", "KAS/USDT", "PENGU/USDT", "ALGO/USDT", "ARB/USDT",
     "POL/USDT", "ATOM/USDT", "BONK/USDT", "WBETH/USDT", "RENDER/USDT", "WLD/USDT",
-    "STORY/USDT", "TRUMP/USDT", "SEI/USDT", "SKY/USDT", "HYPE/USDT", "MKR/USDT",
-    "FIL/USDT", "OP/USDT", "IOTA/USDT", "INJ/USDT", "FET/USDT", "GRT/USDT"
+    "STORY/USDT", "TRUMP/USDT"
 ]
 
 # Configuração de logging
@@ -163,7 +162,7 @@ async def watch_all_exchanges(context: ContextTypes.DEFAULT_TYPE):
         exchange_class = getattr(ccxt, ex_id)
         exchange = exchange_class({
             'enableRateLimit': True,
-            'timeout': 10000,  # Timeout ajustado para 10 segundos
+            'timeout': 10000,
         })
         global_exchanges_instances[ex_id] = exchange
         
