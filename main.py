@@ -132,15 +132,13 @@ async def check_arbitrage_opportunities(context: ContextTypes.DEFAULT_TYPE):
                         )
                         logger.info(msg)
                         await bot.send_message(chat_id=chat_id, text=msg)
-                        last_alert_time[pair] = now  # Atualiza o tempo do último alerta
+                        last_alert_time[pair] = now
                 else:
-                    # Esta linha nos ajudará a diagnosticar o problema
-                    logger.info(f"DEBUG: Oportunidade para {pair} - Lucro Líquido {net_profit_percentage:.2f}% (abaixo do mínimo de {lucro_minimo:.2f}%)")
+                    logger.debug(f"Oportunidade para {pair}: Lucro Líquido {net_profit_percentage:.2f}% (abaixo do mínimo de {lucro_minimo:.2f}%)")
 
         except Exception as e:
             logger.error(f"Erro na checagem de arbitragem: {e}", exc_info=True)
         
-        # Intervalo de 5 segundos entre cada checagem para evitar repetições
         await asyncio.sleep(5)
 
 
@@ -263,11 +261,12 @@ async def stop_arbitrage(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def main():
     application = ApplicationBuilder().token(TOKEN).build()
     
-    # Tarefa para monitorar os WebSockets e atualizar os dados de mercado
-    asyncio.create_task(watch_all_exchanges(application))
-    
-    # Nova tarefa para checar oportunidades de arbitragem em um intervalo fixo
-    asyncio.create_task(check_arbitrage_opportunities(application))
+    # Tarefas a serem executadas em paralelo
+    tasks_to_run = [
+        watch_all_exchanges(application),
+        check_arbitrage_opportunities(application),
+        application.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False),
+    ]
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("setlucro", setlucro))
@@ -285,7 +284,9 @@ async def main():
 
     logger.info("Bot iniciado com sucesso e aguardando mensagens...")
     try:
-        await application.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
+        await asyncio.gather(*tasks_to_run)
+    except Exception as e:
+        logger.error(f"Erro no loop principal do bot: {e}", exc_info=True)
     finally:
         logger.info("Fechando conexões das exchanges...")
         tasks = [ex.close() for ex in global_exchanges_instances.values()]
@@ -293,4 +294,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
