@@ -106,7 +106,6 @@ async def handle_websocket_data(context: ContextTypes.DEFAULT_TYPE):
                 required_buy_volume = trade_amount_usd / best_buy_price
                 required_sell_volume = trade_amount_usd / best_sell_price
 
-                # Verificação de liquidez aprimorada para evitar volumes nulos
                 buy_volume = buy_data.get('ask_volume', 0) if buy_data.get('ask_volume') is not None else 0
                 sell_volume = sell_data.get('bid_volume', 0) if sell_data.get('bid_volume') is not None else 0
 
@@ -140,7 +139,6 @@ async def watch_order_book_for_pair(exchange, pair, ex_id, context):
             best_ask = order_book['asks'][0][0] if order_book['asks'] else float('inf')
             best_ask_volume = order_book['asks'][0][1] if order_book['asks'] else 0
 
-            # Atualiza os dados globais
             GLOBAL_MARKET_DATA[pair][ex_id] = {
                 'bid': best_bid,
                 'bid_volume': best_bid_volume,
@@ -165,7 +163,7 @@ async def watch_all_exchanges(context: ContextTypes.DEFAULT_TYPE):
         exchange_class = getattr(ccxt, ex_id)
         exchange = exchange_class({
             'enableRateLimit': True,
-            'timeout': 3000,
+            'timeout': 10000,  # Timeout ajustado para 10 segundos
         })
         global_exchanges_instances[ex_id] = exchange
         
