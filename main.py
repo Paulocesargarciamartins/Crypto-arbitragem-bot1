@@ -55,7 +55,6 @@ ALERT_COOLDOWN = 60  # Tempo em segundos para esperar antes de enviar um novo al
 async def check_arbitrage_opportunities(context: ContextTypes.DEFAULT_TYPE):
     """
     Função principal que verifica oportunidades de arbitragem e envia alertas.
-    Esta função agora roda em um loop separado.
     """
     bot = context.bot
     chat_id = context.bot_data.get('admin_chat_id')
@@ -134,7 +133,7 @@ async def check_arbitrage_opportunities(context: ContextTypes.DEFAULT_TYPE):
                         await bot.send_message(chat_id=chat_id, text=msg)
                         last_alert_time[pair] = now
                 else:
-                    logger.info(f"Oportunidade para {pair}: Lucro Líquido {net_profit_percentage:.2f}% (abaixo do mínimo de {lucro_minimo:.2f}%)")
+                    logger.debug(f"Oportunidade para {pair}: Lucro Líquido {net_profit_percentage:.2f}% (abaixo do mínimo de {lucro_minimo:.2f}%)")
 
         except Exception as e:
             logger.error(f"Erro na checagem de arbitragem: {e}", exc_info=True)
@@ -171,7 +170,7 @@ async def watch_order_book_for_pair(exchange, pair, ex_id):
         await exchange.close()
 
 
-async def watch_all_exchanges(context: ContextTypes.DEFAULT_TYPE):
+async def watch_all_exchanges(application):
     tasks = []
     for ex_id in EXCHANGES_LIST:
         exchange_class = getattr(ccxt, ex_id)
@@ -255,11 +254,21 @@ async def setfee(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Uso incorreto. Exemplo: /setfee 0.075")
 
 async def stop_arbitrage(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Modo WebSocket: O bot continuará a checar, mas não enviará mais alertas. Reinicie o bot para voltar a receber alertas.")
+    context.bot_data['admin_chat_id'] = None
+    await update.message.reply_text("Alertas desativados. Use /start para reativar.")
     logger.info(f"Alertas de arbitragem desativados por {update.message.chat_id}")
 
+
+async def post_init(application: ApplicationBuilder):
+    """Função executada após a inicialização do Application, mas antes do polling."""
+    # Criamos as tarefas de background aqui e as adicionamos como tarefas do loop de eventos.
+    # Elas rodarão em paralelo com o polling do Telegram.
+    asyncio.create_task(watch_all_exchanges(application))
+    asyncio.create_task(check_arbitrage_opportunities(application))
+
+
 async def main():
-    application = ApplicationBuilder().token(TOKEN).build()
+    application = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
     
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("setlucro", setlucro))
@@ -272,16 +281,12 @@ async def main():
         BotCommand("setlucro", "Definir lucro mínimo em % (Ex: /setlucro 2.5)"),
         BotCommand("setvolume", "Definir volume de trade em USD para liquidez (Ex: /setvolume 100)"),
         BotCommand("setfee", "Definir taxa de negociação por lado em % (Ex: /setfee 0.075)"),
-        BotCommand("stop", "Parar de receber alertas (modo WebSocket)")
+        BotCommand("stop", "Parar de receber alertas")
     ])
 
     logger.info("Bot iniciado com sucesso e aguardando mensagens...")
 
     try:
-        # Criamos as tarefas separadamente e as rodamos em gather para garantir que todas funcionem.
-        websocket_task = asyncio.create_task(watch_all_exchanges(application))
-        arbitrage_task = asyncio.create_task(check_arbitrage_opportunities(application))
-        
         await application.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
 
     except Exception as e:
