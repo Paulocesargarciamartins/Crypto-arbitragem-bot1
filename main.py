@@ -134,7 +134,7 @@ async def check_arbitrage_opportunities(context: ContextTypes.DEFAULT_TYPE):
                         await bot.send_message(chat_id=chat_id, text=msg)
                         last_alert_time[pair] = now
                 else:
-                    logger.debug(f"Oportunidade para {pair}: Lucro Líquido {net_profit_percentage:.2f}% (abaixo do mínimo de {lucro_minimo:.2f}%)")
+                    logger.info(f"Oportunidade para {pair}: Lucro Líquido {net_profit_percentage:.2f}% (abaixo do mínimo de {lucro_minimo:.2f}%)")
 
         except Exception as e:
             logger.error(f"Erro na checagem de arbitragem: {e}", exc_info=True)
@@ -261,12 +261,6 @@ async def stop_arbitrage(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def main():
     application = ApplicationBuilder().token(TOKEN).build()
     
-    # Tarefas a serem executadas em paralelo
-    tasks_to_run = [
-        watch_all_exchanges(application),
-        check_arbitrage_opportunities(application),
-    ]
-
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("setlucro", setlucro))
     application.add_handler(CommandHandler("setvolume", setvolume))
@@ -284,9 +278,12 @@ async def main():
     logger.info("Bot iniciado com sucesso e aguardando mensagens...")
 
     try:
-        # Agora estamos garantindo que a tarefa de polling do Telegram e as outras tarefas
-        # de checagem e WebSocket rodem juntas de forma assíncrona.
-        await asyncio.gather(application.run_polling(), *tasks_to_run)
+        # Criamos as tarefas separadamente e as rodamos em gather para garantir que todas funcionem.
+        websocket_task = asyncio.create_task(watch_all_exchanges(application))
+        arbitrage_task = asyncio.create_task(check_arbitrage_opportunities(application))
+        
+        await application.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
+
     except Exception as e:
         logger.error(f"Erro no loop principal do bot: {e}", exc_info=True)
     finally:
