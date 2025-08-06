@@ -14,8 +14,8 @@ nest_asyncio.apply()
 # --- Configurações básicas ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 DEFAULT_LUCRO_MINIMO_PORCENTAGEM = 2.0
-DEFAULT_TRADE_AMOUNT_USD = 50.0 # Quantidade de USD para verificar liquidez
-DEFAULT_FEE_PERCENTAGE = 0.1 # Taxa de negociação média por lado (0.1% é comum)
+DEFAULT_TRADE_AMOUNT_USD = 50.0  # Quantidade de USD para verificar liquidez
+DEFAULT_FEE_PERCENTAGE = 0.1  # Taxa de negociação média por lado (0.1% é comum)
 
 # Limite máximo de lucro bruto para validação de dados.
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0
@@ -63,7 +63,7 @@ async def fetch_all_market_data_for_pair(exchange_instances, pair):
     market_data = {}
     for result in results:
         if isinstance(result, Exception):
-            logger.warning(f"Erro durante a busca concorrente de dados: {result}")
+            logger.warning(f"Erro durante a busca de dados: {result}")
         elif result:
             ex_id, data = result
             market_data[ex_id] = data
@@ -96,49 +96,39 @@ async def fetch_order_book_safe(exchange, pair, ex_id):
         logger.warning(f"Erro inesperado ao buscar {pair} em {ex_id}: {e}")
     return None
 
-# Função principal para checar arbitragem
+# --- FUNÇÃO DE ARBITRAGEM CORRIGIDA E OTIMIZADA ---
 async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
     bot = context.bot
-    job = context.job
-
     chat_id = context.bot_data.get('admin_chat_id')
     if not chat_id:
-        logger.warning("Nenhum chat_id de administrador configurado. Use /start para registrar.")
+        logger.warning("Nenhum chat_id de administrador configurado.")
         return
 
     try:
-        lucro_minimo_porcentagem = context.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)
+        lucro_minimo = context.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)
         trade_amount_usd = context.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD)
-        fee_percentage = context.bot_data.get('fee_percentage', DEFAULT_FEE_PERCENTAGE)
-        
-        current_scan_opportunities = {}
+        fee = context.bot_data.get('fee_percentage', DEFAULT_FEE_PERCENTAGE) / 100.0  # Convertendo para decimal
 
-        logger.info(f"Iniciando checagem de arbitragem. Lucro mínimo: {lucro_minimo_porcentagem}%, Volume de trade: {trade_amount_usd} USD")
+        logger.info(f"Iniciando checagem de arbitragem. Lucro mínimo: {lucro_minimo}%, Volume de trade: {trade_amount_usd} USD")
 
         exchanges_to_scan = {}
         for ex_id in EXCHANGES_LIST:
             try:
                 if ex_id not in global_exchanges_instances:
                     exchange_class = getattr(ccxt, ex_id)
-                    global_exchanges_instances[ex_id] = exchange_class({
-                        'enableRateLimit': True,
-                        'timeout': 3000,
-                    })
+                    global_exchanges_instances[ex_id] = exchange_class({'enableRateLimit': True, 'timeout': 3000})
 
                 exchange = global_exchanges_instances[ex_id]
-                # Carrega os mercados apenas se ainda não foram carregados
                 if not markets_loaded.get(ex_id):
                     await exchange.load_markets()
                     markets_loaded[ex_id] = True
-                    logger.info(f"Mercados de {ex_id} carregados na primeira execução do job.")
                 
                 exchanges_to_scan[ex_id] = exchange
             except Exception as e:
-                logger.error(f"ERRO: Não foi possível carregar ou inicializar a exchange {ex_id}: {e}")
-                
+                logger.error(f"ERRO: Não foi possível carregar a exchange {ex_id}: {e}")
+        
         if len(exchanges_to_scan) < 2:
-            logger.error("Não há exchanges suficientes carregadas globalmente para verificar arbitragem.")
-            await bot.send_message(chat_id=chat_id, text="Erro: Não foi possível conectar a exchanges suficientes para checar arbitragem.")
+            logger.error("Não há exchanges suficientes para checar arbitragem.")
             return
 
         for pair in PAIRS:
@@ -147,75 +137,71 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
             if len(market_data) < 2:
                 continue
 
-            for buy_ex_id, buy_data in market_data.items():
-                for sell_ex_id, sell_data in market_data.items():
-                    if buy_ex_id == sell_ex_id:
-                        continue
-
-                    buy_price = buy_data['ask']
-                    sell_price = sell_data['bid']
-
-                    if buy_price == 0:
-                        continue
-
-                    gross_profit_percentage = ((sell_price - buy_price) / buy_price) * 100
-
-                    if gross_profit_percentage > MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK:
-                        logger.warning(f"Lucro bruto irrealista para {pair} ({gross_profit_percentage:.2f}%). "
-                                    f"Dados suspeitos: Comprar em {buy_ex_id}: {buy_price}, Vender em {sell_ex_id}: {sell_price}. Pulando.")
-                        continue
-
-                    net_profit_percentage = gross_profit_percentage - (2 * fee_percentage)
-
-                    if net_profit_percentage >= lucro_minimo_porcentagem:
-                        required_buy_volume = trade_amount_usd / buy_price
-                        required_sell_volume = trade_amount_usd / sell_price
-
-                        has_sufficient_liquidity = (
-                            buy_data['ask_volume'] >= required_buy_volume and
-                            sell_data['bid_volume'] >= required_sell_volume
-                        )
-
-                        if has_sufficient_liquidity:
-                            opportunity_key = (pair, buy_ex_id, sell_ex_id)
-                            current_scan_opportunities[opportunity_key] = {
-                                'buy_price': buy_price,
-                                'sell_price': sell_price,
-                                'net_profit': net_profit_percentage,
-                                'volume': trade_amount_usd
-                            }
-        
-        # A nova lógica de alerta simplificada
-        for key, current_opp_data in current_scan_opportunities.items():
-            pair, buy_ex, sell_ex = key
-            current_time_dt = datetime.now()
-            
-            msg = (f"💰 Arbitragem para {pair} ({current_time_dt.strftime('%H:%M:%S')})!\n"
-                f"Compre em {buy_ex}: {current_opp_data['buy_price']:.8f}\n"
-                f"Venda em {sell_ex}: {current_opp_data['sell_price']:.8f}\n"
-                f"Lucro Líquido: {current_opp_data['net_profit']:.2f}%\n"
-                f"Volume: ${current_opp_data['volume']:.2f}"
+            # Encontra o melhor ASK (menor preço de compra) e a exchange correspondente
+            best_buy_opportunity = min(
+                (data for data in market_data.values() if data['ask'] > 0),
+                key=lambda x: x['ask'],
+                default=None
             )
-            logger.info(msg)
-            await bot.send_message(chat_id=chat_id, text=msg)
+            
+            # Encontra o melhor BID (maior preço de venda) e a exchange correspondente
+            best_sell_opportunity = max(
+                (data for data in market_data.values() if data['bid'] > 0),
+                key=lambda x: x['bid'],
+                default=None
+            )
+
+            if not best_buy_opportunity or not best_sell_opportunity:
+                continue
+
+            buy_ex_id = [k for k, v in market_data.items() if v == best_buy_opportunity][0]
+            sell_ex_id = [k for k, v in market_data.items() if v == best_sell_opportunity][0]
+
+            # Garante que não é a mesma exchange para compra e venda
+            if buy_ex_id == sell_ex_id:
+                continue
+
+            min_ask_price = best_buy_opportunity['ask']
+            max_bid_price = best_sell_opportunity['bid']
+
+            # Inicia a checagem de arbitragem
+            gross_profit = (max_bid_price - min_ask_price) / min_ask_price
+            gross_profit_percentage = gross_profit * 100
+
+            if gross_profit_percentage > MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK:
+                logger.warning(f"Lucro bruto irrealista para {pair} ({gross_profit_percentage:.2f}%). Pulando.")
+                continue
+
+            # Cálculo de lucro líquido
+            net_profit_percentage = gross_profit_percentage - (2 * fee * 100)
+            
+            if net_profit_percentage >= lucro_minimo:
+                required_buy_volume = trade_amount_usd / min_ask_price
+                required_sell_volume = trade_amount_usd / max_bid_price
+
+                has_sufficient_liquidity = (
+                    best_buy_opportunity['ask_volume'] >= required_buy_volume and
+                    best_sell_opportunity['bid_volume'] >= required_sell_volume
+                )
+
+                if has_sufficient_liquidity:
+                    msg = (f"💰 Arbitragem para {pair}!\n"
+                        f"Compre em {buy_ex_id}: {min_ask_price:.8f}\n"
+                        f"Venda em {sell_ex_id}: {max_bid_price:.8f}\n"
+                        f"Lucro Líquido: {net_profit_percentage:.2f}%\n"
+                        f"Volume: ${trade_amount_usd:.2f}"
+                    )
+                    logger.info(msg)
+                    await bot.send_message(chat_id=chat_id, text=msg)
 
     except Exception as e:
         logger.error(f"Erro geral na checagem de arbitragem: {e}", exc_info=True)
         if chat_id:
             await bot.send_message(chat_id=chat_id, text=f"Erro crítico na checagem de arbitragem: {e}")
     finally:
-        logger.info("Fechando conexões das exchanges...")
-        tasks = []
-        for exchange in global_exchanges_instances.values():
-            async def close_with_timeout(ex):
-                try:
-                    await asyncio.wait_for(ex.close(), timeout=5) # 5 segundos de timeout
-                except asyncio.TimeoutError:
-                    logger.error(f"Timeout ao fechar conexão da exchange {ex.id}")
-                except Exception as e:
-                    logger.error(f"Erro ao fechar conexão da exchange {ex.id}: {e}")
-            tasks.append(close_with_timeout(exchange))
-        await asyncio.gather(*tasks)
+        logger.info("Fechando conexões...")
+        tasks = [ex.close() for ex in global_exchanges_instances.values()]
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.bot_data['admin_chat_id'] = update.message.chat_id
@@ -324,17 +310,8 @@ async def main():
         await application.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
     finally:
         logger.info("Fechando conexões das exchanges...")
-        tasks = []
-        for exchange in global_exchanges_instances.values():
-            async def close_with_timeout(ex):
-                try:
-                    await asyncio.wait_for(ex.close(), timeout=5) # 5 segundos de timeout
-                except asyncio.TimeoutError:
-                    logger.error(f"Timeout ao fechar conexão da exchange {ex.id}")
-                except Exception as e:
-                    logger.error(f"Erro ao fechar conexão da exchange {ex.id}: {e}")
-            tasks.append(close_with_timeout(exchange))
-        await asyncio.gather(*tasks)
+        tasks = [ex.close() for ex in global_exchanges_instances.values()]
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 if __name__ == "__main__":
     asyncio.run(main())
