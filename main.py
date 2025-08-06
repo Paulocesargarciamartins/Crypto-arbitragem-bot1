@@ -65,6 +65,8 @@ async def check_arbitrage_opportunities(context: ContextTypes.DEFAULT_TYPE):
 
     while True:
         try:
+            logger.info("Executando checagem de arbitragem...")
+
             lucro_minimo = context.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)
             trade_amount_usd = context.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD)
             fee = context.bot_data.get('fee_percentage', DEFAULT_FEE_PERCENTAGE) / 100.0
@@ -131,7 +133,10 @@ async def check_arbitrage_opportunities(context: ContextTypes.DEFAULT_TYPE):
                         logger.info(msg)
                         await bot.send_message(chat_id=chat_id, text=msg)
                         last_alert_time[pair] = now  # Atualiza o tempo do último alerta
-        
+                else:
+                    # Esta linha nos ajudará a diagnosticar o problema
+                    logger.info(f"DEBUG: Oportunidade para {pair} - Lucro Líquido {net_profit_percentage:.2f}% (abaixo do mínimo de {lucro_minimo:.2f}%)")
+
         except Exception as e:
             logger.error(f"Erro na checagem de arbitragem: {e}", exc_info=True)
         
