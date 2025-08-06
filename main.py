@@ -298,7 +298,7 @@ async def main():
     application.add_handler(CommandHandler("setfee", setfee))
     application.add_handler(CommandHandler("stop", stop_arbitrage))
 
-    application.job_queue.run_repeating(check_arbitrage, interval=60, first=5, name="check_arbitrage")
+    application.job_queue.run_repeating(check_arbitrage, interval=90, first=5, name="check_arbitrage")
 
     await application.bot.set_my_commands([
         BotCommand("start", "Iniciar o bot e ver configurações"),
