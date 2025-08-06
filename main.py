@@ -204,7 +204,18 @@ async def check_arbitrage(context: ContextTypes.DEFAULT_TYPE):
         if chat_id:
             await bot.send_message(chat_id=chat_id, text=f"Erro crítico na checagem de arbitragem: {e}")
     finally:
-        pass
+        logger.info("Fechando conexões das exchanges...")
+        tasks = []
+        for exchange in global_exchanges_instances.values():
+            async def close_with_timeout(ex):
+                try:
+                    await asyncio.wait_for(ex.close(), timeout=5) # 5 segundos de timeout
+                except asyncio.TimeoutError:
+                    logger.error(f"Timeout ao fechar conexão da exchange {ex.id}")
+                except Exception as e:
+                    logger.error(f"Erro ao fechar conexão da exchange {ex.id}: {e}")
+            tasks.append(close_with_timeout(exchange))
+        await asyncio.gather(*tasks)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.bot_data['admin_chat_id'] = update.message.chat_id
@@ -313,11 +324,17 @@ async def main():
         await application.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
     finally:
         logger.info("Fechando conexões das exchanges...")
+        tasks = []
         for exchange in global_exchanges_instances.values():
-            try:
-                await exchange.close()
-            except Exception as e:
-                logger.error(f"Erro inesperado ao fechar conexão da exchange {exchange.id}: {e}")
+            async def close_with_timeout(ex):
+                try:
+                    await asyncio.wait_for(ex.close(), timeout=5) # 5 segundos de timeout
+                except asyncio.TimeoutError:
+                    logger.error(f"Timeout ao fechar conexão da exchange {ex.id}")
+                except Exception as e:
+                    logger.error(f"Erro ao fechar conexão da exchange {ex.id}: {e}")
+            tasks.append(close_with_timeout(exchange))
+        await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
     asyncio.run(main())
