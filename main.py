@@ -24,7 +24,7 @@ EXCHANGES_LIST = [
     'kucoin', 'bitstamp', 'bitfinex', 'bitget', 'mexc'
 ]
 
-# Pares USDT (mantém a mesma lista)
+# Pares USDT
 PAIRS = [
     "BTC/USDT", "ETH/USDT", "XRP/USDT", "USDT/USDT", "BNB/USDT", "SOL/USDT",
     "USDC/USDT", "STETH/USDT", "DOGE/USDT", "TRX/USDT", "ADA/USDT", "XLM/USDT",
@@ -131,6 +131,39 @@ async def handle_websocket_data(context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Erro na checagem de arbitragem por WebSocket: {e}", exc_info=True)
 
 
+async def watch_order_book_for_pair(exchange, pair, ex_id, context):
+    """
+    Conecta e monitora o livro de ofertas de um par em uma exchange.
+    """
+    try:
+        while True:
+            order_book = await exchange.watch_order_book(pair)
+            
+            best_bid = order_book['bids'][0][0] if order_book['bids'] else 0
+            best_bid_volume = order_book['bids'][0][1] if order_book['bids'] else 0
+            best_ask = order_book['asks'][0][0] if order_book['asks'] else float('inf')
+            best_ask_volume = order_book['asks'][0][1] if order_book['asks'] else 0
+
+            # Atualiza os dados globais
+            GLOBAL_MARKET_DATA[pair][ex_id] = {
+                'bid': best_bid,
+                'bid_volume': best_bid_volume,
+                'ask': best_ask,
+                'ask_volume': best_ask_volume
+            }
+            # Chama a função de arbitragem a cada atualização
+            await handle_websocket_data(context)
+
+    except ccxt.NetworkError as e:
+        logger.error(f"Erro de rede no WebSocket para {pair} em {ex_id}: {e}")
+    except ccxt.ExchangeError as e:
+        logger.error(f"Erro da exchange no WebSocket para {pair} em {ex_id}: {e}")
+    except Exception as e:
+        logger.error(f"Erro inesperado no WebSocket para {pair} em {ex_id}: {e}")
+    finally:
+        await exchange.close()
+
+
 async def watch_all_exchanges(context: ContextTypes.DEFAULT_TYPE):
     """
     Mantém conexões WebSocket para todas as exchanges e pares.
@@ -152,37 +185,6 @@ async def watch_all_exchanges(context: ContextTypes.DEFAULT_TYPE):
     
     logger.info("Iniciando WebSockets para todas as exchanges e pares...")
     await asyncio.gather(*tasks, return_exceptions=True)
-
-async def watch_order_book_for_pair(exchange, pair, ex_id, context):
-    """
-    Conecta e monitora o livro de ofertas de um par em uma exchange.
-    """
-    try:
-        while True:
-            order_book = await exchange.book(pair)
-            
-            best_bid = order_book['bids'][0][0] if order_book['bids'] else 0
-            best_bid_volume = order_book['bids'][0][1] if order_book['bids'] else 0
-            best_ask = order_book['asks'][0][0] if order_book['asks'] else float('inf')
-            best_ask_volume = order_book['asks'][0][1] if order_book['asks'] else 0
-
-            GLOBAL_MARKET_DATA[pair][ex_id] = {
-                'bid': best_bid,
-                'bid_volume': best_bid_volume,
-                'ask': best_ask,
-                'ask_volume': best_ask_volume
-            }
-            # Chama a função de arbitragem a cada atualização
-            await handle_websocket_data(context)
-
-    except ccxt.NetworkError as e:
-        logger.error(f"Erro de rede no WebSocket para {pair} em {ex_id}: {e}")
-    except ccxt.ExchangeError as e:
-        logger.error(f"Erro da exchange no WebSocket para {pair} em {ex_id}: {e}")
-    except Exception as e:
-        logger.error(f"Erro inesperado no WebSocket para {pair} em {ex_id}: {e}")
-    finally:
-        await exchange.close()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.bot_data['admin_chat_id'] = update.message.chat_id
