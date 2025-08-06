@@ -48,88 +48,101 @@ global_exchanges_instances = {}
 GLOBAL_MARKET_DATA = {pair: {} for pair in PAIRS}
 markets_loaded = {}
 
-# --- NOVAS VARIÁVEIS PARA COOLDOWN ---
+# --- VARIÁVEIS PARA COOLDOWN ---
 last_alert_time = {}
 ALERT_COOLDOWN = 60  # Tempo em segundos para esperar antes de enviar um novo alerta para o mesmo par.
 
-async def handle_websocket_data(context: ContextTypes.DEFAULT_TYPE):
+async def check_arbitrage_opportunities(context: ContextTypes.DEFAULT_TYPE):
+    """
+    Função principal que verifica oportunidades de arbitragem e envia alertas.
+    Esta função agora roda em um loop separado.
+    """
     bot = context.bot
     chat_id = context.bot_data.get('admin_chat_id')
     if not chat_id:
+        logger.warning("Nenhum chat_id de administrador definido. O bot não enviará alertas.")
         return
 
-    try:
-        lucro_minimo = context.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)
-        trade_amount_usd = context.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD)
-        fee = context.bot_data.get('fee_percentage', DEFAULT_FEE_PERCENTAGE) / 100.0
+    while True:
+        try:
+            lucro_minimo = context.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)
+            trade_amount_usd = context.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD)
+            fee = context.bot_data.get('fee_percentage', DEFAULT_FEE_PERCENTAGE) / 100.0
 
-        for pair in PAIRS:
-            market_data = GLOBAL_MARKET_DATA[pair]
-            if len(market_data) < 2:
-                continue
+            for pair in PAIRS:
+                market_data = GLOBAL_MARKET_DATA[pair]
+                if len(market_data) < 2:
+                    continue
 
-            # --- NOVA LÓGICA DE COOLDOWN ---
-            now = asyncio.get_event_loop().time()
-            if pair in last_alert_time and now - last_alert_time[pair] < ALERT_COOLDOWN:
-                continue
+                # Lógica de cooldown: verifica se já passou o tempo mínimo para o próximo alerta.
+                now = asyncio.get_event_loop().time()
+                if pair in last_alert_time and now - last_alert_time[pair] < ALERT_COOLDOWN:
+                    continue
 
-            best_buy_price = float('inf')
-            buy_ex_id = None
-            buy_data = None
-            
-            best_sell_price = 0
-            sell_ex_id = None
-            sell_data = None
-
-            for ex_id, data in market_data.items():
-                if data.get('ask') is not None and data['ask'] < best_buy_price:
-                    best_buy_price = data['ask']
-                    buy_ex_id = ex_id
-                    buy_data = data
+                best_buy_price = float('inf')
+                buy_ex_id = None
+                buy_data = None
                 
-                if data.get('bid') is not None and data['bid'] > best_sell_price:
-                    best_sell_price = data['bid']
-                    sell_ex_id = ex_id
-                    sell_data = data
+                best_sell_price = 0
+                sell_ex_id = None
+                sell_data = None
 
-            if not buy_ex_id or not sell_ex_id or buy_ex_id == sell_ex_id:
-                continue
-            
-            gross_profit = (best_sell_price - best_buy_price) / best_buy_price
-            gross_profit_percentage = gross_profit * 100
+                for ex_id, data in market_data.items():
+                    if data.get('ask') is not None and data['ask'] < best_buy_price:
+                        best_buy_price = data['ask']
+                        buy_ex_id = ex_id
+                        buy_data = data
+                    
+                    if data.get('bid') is not None and data['bid'] > best_sell_price:
+                        best_sell_price = data['bid']
+                        sell_ex_id = ex_id
+                        sell_data = data
 
-            if gross_profit_percentage > MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK:
-                continue
+                if not buy_ex_id or not sell_ex_id or buy_ex_id == sell_ex_id:
+                    continue
+                
+                gross_profit = (best_sell_price - best_buy_price) / best_buy_price
+                gross_profit_percentage = gross_profit * 100
 
-            net_profit_percentage = gross_profit_percentage - (2 * fee * 100)
-            
-            if net_profit_percentage >= lucro_minimo:
-                required_buy_volume = trade_amount_usd / best_buy_price
-                required_sell_volume = trade_amount_usd / best_sell_price
+                if gross_profit_percentage > MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK:
+                    continue
 
-                buy_volume = buy_data.get('ask_volume', 0) if buy_data.get('ask_volume') is not None else 0
-                sell_volume = sell_data.get('bid_volume', 0) if sell_data.get('bid_volume') is not None else 0
+                net_profit_percentage = gross_profit_percentage - (2 * fee * 100)
+                
+                if net_profit_percentage >= lucro_minimo:
+                    required_buy_volume = trade_amount_usd / best_buy_price
+                    required_sell_volume = trade_amount_usd / best_sell_price
 
-                has_sufficient_liquidity = (
-                    buy_volume >= required_buy_volume and
-                    sell_volume >= required_sell_volume
-                )
+                    buy_volume = buy_data.get('ask_volume', 0) if buy_data.get('ask_volume') is not None else 0
+                    sell_volume = sell_data.get('bid_volume', 0) if sell_data.get('bid_volume') is not None else 0
 
-                if has_sufficient_liquidity:
-                    msg = (f"💰 Arbitragem para {pair}!\n"
-                        f"Compre em {buy_ex_id}: {best_buy_price:.8f}\n"
-                        f"Venda em {sell_ex_id}: {best_sell_price:.8f}\n"
-                        f"Lucro Líquido: {net_profit_percentage:.2f}%\n"
-                        f"Volume: ${trade_amount_usd:.2f}"
+                    has_sufficient_liquidity = (
+                        buy_volume >= required_buy_volume and
+                        sell_volume >= required_sell_volume
                     )
-                    logger.info(msg)
-                    await bot.send_message(chat_id=chat_id, text=msg)
-                    last_alert_time[pair] = now  # Atualiza o tempo do último alerta
-    except Exception as e:
-        logger.error(f"Erro na checagem de arbitragem por WebSocket: {e}", exc_info=True)
+
+                    if has_sufficient_liquidity:
+                        msg = (f"💰 Arbitragem para {pair}!\n"
+                            f"Compre em {buy_ex_id}: {best_buy_price:.8f}\n"
+                            f"Venda em {sell_ex_id}: {best_sell_price:.8f}\n"
+                            f"Lucro Líquido: {net_profit_percentage:.2f}%\n"
+                            f"Volume: ${trade_amount_usd:.2f}"
+                        )
+                        logger.info(msg)
+                        await bot.send_message(chat_id=chat_id, text=msg)
+                        last_alert_time[pair] = now  # Atualiza o tempo do último alerta
+        
+        except Exception as e:
+            logger.error(f"Erro na checagem de arbitragem: {e}", exc_info=True)
+        
+        # Intervalo de 5 segundos entre cada checagem para evitar repetições
+        await asyncio.sleep(5)
 
 
-async def watch_order_book_for_pair(exchange, pair, ex_id, context):
+async def watch_order_book_for_pair(exchange, pair, ex_id):
+    """
+    Função que apenas atualiza os dados de mercado.
+    """
     try:
         while True:
             order_book = await exchange.watch_order_book(pair)
@@ -145,8 +158,6 @@ async def watch_order_book_for_pair(exchange, pair, ex_id, context):
                 'ask': best_ask,
                 'ask_volume': best_ask_volume
             }
-            await handle_websocket_data(context)
-
     except ccxt.NetworkError as e:
         logger.error(f"Erro de rede no WebSocket para {pair} em {ex_id}: {e}")
     except ccxt.ExchangeError as e:
@@ -176,7 +187,7 @@ async def watch_all_exchanges(context: ContextTypes.DEFAULT_TYPE):
             for pair in PAIRS:
                 if pair in exchange.markets:
                     tasks.append(asyncio.create_task(
-                        watch_order_book_for_pair(exchange, pair, ex_id, context)
+                        watch_order_book_for_pair(exchange, pair, ex_id)
                     ))
                 else:
                     logger.warning(f"Par {pair} não está disponível em {ex_id}. Ignorando...")
@@ -247,7 +258,11 @@ async def stop_arbitrage(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def main():
     application = ApplicationBuilder().token(TOKEN).build()
     
+    # Tarefa para monitorar os WebSockets e atualizar os dados de mercado
     asyncio.create_task(watch_all_exchanges(application))
+    
+    # Nova tarefa para checar oportunidades de arbitragem em um intervalo fixo
+    asyncio.create_task(check_arbitrage_opportunities(application))
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("setlucro", setlucro))
@@ -273,3 +288,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
