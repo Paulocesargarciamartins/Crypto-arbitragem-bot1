@@ -19,23 +19,41 @@ DEFAULT_FEE_PERCENTAGE = 0.1
 # Limite máximo de lucro bruto para validação de dados.
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0
 
-# Exchanges confiáveis para monitorar (BITFINEX REMOVIDA)
+# Exchanges confiáveis para monitorar
 EXCHANGES_LIST = [
     'binance', 'coinbase', 'kraken', 'okx', 'bybit',
     'kucoin', 'bitstamp', 'bitget',
 ]
 
-# Pares USDT - OTIMIZADA para o plano Eco Dynos (50 principais moedas)
+# Pares USDT - OTIMIZADA para o plano profissional (150 principais moedas)
+# Lista atualizada com as 150 principais criptos por capitalização de mercado.
 PAIRS = [
-    "BTC/USDT", "ETH/USDT", "XRP/USDT", "USDT/USDT", "BNB/USDT", "SOL/USDT",
-    "USDC/USDT", "TRX/USDT", "DOGE/USDT", "ADA/USDT", "WBTC/USDT", "STETH/USDT",
-    "XLM/USDT", "SUI/USDT", "BCH/USDT", "LINK/USDT", "HBAR/USDT", "AVAX/USDT",
-    "LTC/USDT", "USDS/USDT", "TON/USDT", "SHIB/USDT", "UNI/USDT", "DOT/USDT",
-    "XMR/USDT", "CRO/USDT", "PEPE/USDT", "AAVE/USDT", "ENA/USDT", "DAI/USDT",
-    "TAO/USDT", "NEAR/USDT", "ETC/USDT", "MNT/USDT", "ONDO/USDT", "APT/USDT",
-    "ICP/USDT", "JITOSOL/USDT", "KAS/USDT", "PENGU/USDT", "ALGO/USDT", "ARB/USDT",
-    "POL/USDT", "ATOM/USDT", "BONK/USDT", "WBETH/USDT", "RENDER/USDT", "WLD/USDT",
-    "STORY/USDT", "TRUMP/USDT"
+    "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "USDC/USDT",
+    "DOGE/USDT", "ADA/USDT", "TRX/USDT", "SHIB/USDT", "AVAX/USDT", "DOT/USDT",
+    "LINK/USDT", "WBTC/USDT", "STETH/USDT", "TON/USDT", "BCH/USDT", "LTC/USDT",
+    "UNI/USDT", "ETC/USDT", "XLM/USDT", "PEPE/USDT", "FIL/USDT", "NEAR/USDT",
+    "WIF/USDT", "RUNE/USDT", "THETA/USDT", "LDO/USDT", "TIA/USDT", "JUP/USDT",
+    "CRO/USDT", "INJ/USDT", "MKR/USDT", "APT/USDT", "IMX/USDT", "ARB/USDT",
+    "SUI/USDT", "FLOKI/USDT", "WLD/USDT", "OP/USDT", "HBAR/USDT", "SATS/USDT",
+    "VET/USDT", "KAS/USDT", "GRT/USDT", "MINA/USDT", "ENA/USDT", "STRK/USDT",
+    "TAO/USDT", "AAVE/USDT", "SEI/USDT", "FET/USDT", "FLOW/USDT", "FDUSD/USDT",
+    "GALA/USDT", "QNT/USDT", "DYDX/USDT", "ORDI/USDT", "MNT/USDT", "AXS/USDT",
+    "CHZ/USDT", "EOS/USDT", "SNX/USDT", "BONK/USDT", "SAND/USDT", "XTZ/USDT",
+    "STX/USDT", "PYTH/USDT", "TFUEL/USDT", "ALGO/USDT", "AKT/USDT", "RON/USDT",
+    "WEMIX/USDT", "EGLD/USDT", "RNDR/USDT", "CORE/USDT", "IOTA/USDT", "CFX/USDT",
+    "GNO/USDT", "AR/USDT", "BTT/USDT", "KLAY/USDT", "NEO/USDT", "CRV/USDT",
+    "SSV/USDT", "BEAMX/USDT", "ZEC/USDT", "JASMY/USDT", "MANA/USDT", "SFP/USDT",
+    "LEO/USDT", "KDA/USDT", "BOME/USDT", "DYM/USDT", "JTO/USDT", "FTM/USDT",
+    "WOO/USDT", "OM/USDT", "ZETA/USDT", "DASH/USDT", "ETC/USDT", "BTG/USDT",
+    "BNX/USDT", "GLM/USDT", "XEM/USDT", "SWRV/USDT", "ROSE/USDT", "OGN/USDT",
+    "QTUM/USDT", "KSM/USDT", "OCEAN/USDT", "SUSHI/USDT", "CVX/USDT", "CELO/USDT",
+    "WAVES/USDT", "DENT/USDT", "ILV/USDT", "AGIX/USDT", "TEL/USDT", "TLOS/USDT",
+    "HIVE/USDT", "SXP/USDT", "DGB/USDT", "LUNC/USDT", "PERP/USDT", "FXS/USDT",
+    "TRB/USDT", "VVS/USDT", "GMT/USDT", "CSPR/USDT", "CELO/USDT", "ZRX/USDT",
+    "TOMO/USDT", "LPT/USDT", "RPL/USDT", "EWT/USDT", "MOVR/USDT", "SCRT/USDT",
+    "CVC/USDT", "MASK/USDT", "RAY/USDT", "STORJ/USDT", "BAND/USDT", "ONE/USDT",
+    "ZIL/USDT", "XNO/USDT", "PLA/USDT", "XCH/USDT", "NEXO/USDT", "PYR/USDT",
+    "GMX/USDT", "NMR/USDT", "AMP/USDT", "TCT/USDT", "JASMY/USDT", "BICO/USDT"
 ]
 
 # Configuração de logging
