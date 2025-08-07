@@ -5,7 +5,7 @@ from telegram import Update, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import ccxt.pro as ccxt
 import nest_asyncio
-import time # NOVO: Importação do módulo time
+import time
 
 # Aplica o patch para permitir loops aninhados
 nest_asyncio.apply()
@@ -22,7 +22,8 @@ MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0
 # Exchanges confiáveis para monitorar (BITFINEX REMOVIDA)
 EXCHANGES_LIST = [
     'binance', 'coinbase', 'kraken', 'okx', 'bybit',
-    'kucoin', 'bitstamp', 'bitget', 'mexc'
+    'kucoin', 'bitstamp', 'bitget',
+    # 'mexc' foi removida para eliminar erros de conexão
 ]
 
 # Pares USDT - OTIMIZADA para o plano Eco Dynos (50 principais moedas)
@@ -49,10 +50,10 @@ global_exchanges_instances = {}
 GLOBAL_MARKET_DATA = {pair: {} for pair in PAIRS}
 markets_loaded = {}
 
-# NOVO: Dicionário para gerenciar o cooldown dos alertas
+# Dicionário para gerenciar o cooldown dos alertas
 # A chave será uma string única para cada oportunidade de arbitragem (ex: 'LTC/USDT-binance-bybit')
 last_alert_times = {}
-COOLDOWN_SECONDS = 300 # NOVO: Define o intervalo de cooldown em segundos (300s = 5 minutos)
+COOLDOWN_SECONDS = 300 # Define o intervalo de cooldown em segundos (300s = 5 minutos)
 
 async def check_arbitrage_opportunities(application):
     """
@@ -121,13 +122,13 @@ async def check_arbitrage_opportunities(application):
                     )
 
                     if has_sufficient_liquidity:
-                        # --- NOVO: Lógica de Cooldown ---
+                        # --- Lógica de Cooldown ---
                         arbitrage_key = f"{pair}-{buy_ex_id}-{sell_ex_id}"
                         current_time = time.time()
                         
                         if arbitrage_key in last_alert_times and (current_time - last_alert_times[arbitrage_key]) < COOLDOWN_SECONDS:
                             logger.debug(f"Alerta para {arbitrage_key} em cooldown. Ignorando.")
-                            continue # Pula para a próxima oportunidade
+                            continue
                         
                         # Se não estiver em cooldown, envia o alerta
                         msg = (f"💰 Arbitragem para {pair}!\n"
@@ -138,7 +139,7 @@ async def check_arbitrage_opportunities(application):
                         )
                         logger.info(msg)
                         await bot.send_message(chat_id=chat_id, text=msg)
-                        last_alert_times[arbitrage_key] = current_time # NOVO: Atualiza o timestamp do alerta
+                        last_alert_times[arbitrage_key] = current_time
                 else:
                     logger.debug(f"Oportunidade para {pair}: Lucro Líquido {net_profit_percentage:.2f}% (abaixo do mínimo de {lucro_minimo:.2f}%)")
 
