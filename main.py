@@ -19,41 +19,24 @@ DEFAULT_FEE_PERCENTAGE = 0.1
 # Limite máximo de lucro bruto para validação de dados.
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0
 
-# Exchanges confiáveis para monitorar
+# Exchanges confiáveis para monitorar (BITFINEX REMOVIDA)
 EXCHANGES_LIST = [
     'binance', 'coinbase', 'kraken', 'okx', 'bybit',
     'kucoin', 'bitstamp', 'bitget',
+    # 'mexc' foi removida para eliminar erros de conexão
 ]
 
-# Pares USDT - OTIMIZADA para o plano profissional (150 principais moedas)
-# Lista atualizada com as 150 principais criptos por capitalização de mercado.
+# Pares USDT - OTIMIZADA para o plano Eco Dynos (50 principais moedas)
 PAIRS = [
-    "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "USDC/USDT",
-    "DOGE/USDT", "ADA/USDT", "TRX/USDT", "SHIB/USDT", "AVAX/USDT", "DOT/USDT",
-    "LINK/USDT", "WBTC/USDT", "STETH/USDT", "TON/USDT", "BCH/USDT", "LTC/USDT",
-    "UNI/USDT", "ETC/USDT", "XLM/USDT", "PEPE/USDT", "FIL/USDT", "NEAR/USDT",
-    "WIF/USDT", "RUNE/USDT", "THETA/USDT", "LDO/USDT", "TIA/USDT", "JUP/USDT",
-    "CRO/USDT", "INJ/USDT", "MKR/USDT", "APT/USDT", "IMX/USDT", "ARB/USDT",
-    "SUI/USDT", "FLOKI/USDT", "WLD/USDT", "OP/USDT", "HBAR/USDT", "SATS/USDT",
-    "VET/USDT", "KAS/USDT", "GRT/USDT", "MINA/USDT", "ENA/USDT", "STRK/USDT",
-    "TAO/USDT", "AAVE/USDT", "SEI/USDT", "FET/USDT", "FLOW/USDT", "FDUSD/USDT",
-    "GALA/USDT", "QNT/USDT", "DYDX/USDT", "ORDI/USDT", "MNT/USDT", "AXS/USDT",
-    "CHZ/USDT", "EOS/USDT", "SNX/USDT", "BONK/USDT", "SAND/USDT", "XTZ/USDT",
-    "STX/USDT", "PYTH/USDT", "TFUEL/USDT", "ALGO/USDT", "AKT/USDT", "RON/USDT",
-    "WEMIX/USDT", "EGLD/USDT", "RNDR/USDT", "CORE/USDT", "IOTA/USDT", "CFX/USDT",
-    "GNO/USDT", "AR/USDT", "BTT/USDT", "KLAY/USDT", "NEO/USDT", "CRV/USDT",
-    "SSV/USDT", "BEAMX/USDT", "ZEC/USDT", "JASMY/USDT", "MANA/USDT", "SFP/USDT",
-    "LEO/USDT", "KDA/USDT", "BOME/USDT", "DYM/USDT", "JTO/USDT", "FTM/USDT",
-    "WOO/USDT", "OM/USDT", "ZETA/USDT", "DASH/USDT", "ETC/USDT", "BTG/USDT",
-    "BNX/USDT", "GLM/USDT", "XEM/USDT", "SWRV/USDT", "ROSE/USDT", "OGN/USDT",
-    "QTUM/USDT", "KSM/USDT", "OCEAN/USDT", "SUSHI/USDT", "CVX/USDT", "CELO/USDT",
-    "WAVES/USDT", "DENT/USDT", "ILV/USDT", "AGIX/USDT", "TEL/USDT", "TLOS/USDT",
-    "HIVE/USDT", "SXP/USDT", "DGB/USDT", "LUNC/USDT", "PERP/USDT", "FXS/USDT",
-    "TRB/USDT", "VVS/USDT", "GMT/USDT", "CSPR/USDT", "CELO/USDT", "ZRX/USDT",
-    "TOMO/USDT", "LPT/USDT", "RPL/USDT", "EWT/USDT", "MOVR/USDT", "SCRT/USDT",
-    "CVC/USDT", "MASK/USDT", "RAY/USDT", "STORJ/USDT", "BAND/USDT", "ONE/USDT",
-    "ZIL/USDT", "XNO/USDT", "PLA/USDT", "XCH/USDT", "NEXO/USDT", "PYR/USDT",
-    "GMX/USDT", "NMR/USDT", "AMP/USDT", "TCT/USDT", "JASMY/USDT", "BICO/USDT"
+    "BTC/USDT", "ETH/USDT", "XRP/USDT", "USDT/USDT", "BNB/USDT", "SOL/USDT",
+    "USDC/USDT", "TRX/USDT", "DOGE/USDT", "ADA/USDT", "WBTC/USDT", "STETH/USDT",
+    "XLM/USDT", "SUI/USDT", "BCH/USDT", "LINK/USDT", "HBAR/USDT", "AVAX/USDT",
+    "LTC/USDT", "USDS/USDT", "TON/USDT", "SHIB/USDT", "UNI/USDT", "DOT/USDT",
+    "XMR/USDT", "CRO/USDT", "PEPE/USDT", "AAVE/USDT", "ENA/USDT", "DAI/USDT",
+    "TAO/USDT", "NEAR/USDT", "ETC/USDT", "MNT/USDT", "ONDO/USDT", "APT/USDT",
+    "ICP/USDT", "JITOSOL/USDT", "KAS/USDT", "PENGU/USDT", "ALGO/USDT", "ARB/USDT",
+    "POL/USDT", "ATOM/USDT", "BONK/USDT", "WBETH/USDT", "RENDER/USDT", "WLD/USDT",
+    "STORY/USDT", "TRUMP/USDT"
 ]
 
 # Configuração de logging
@@ -68,12 +51,13 @@ GLOBAL_MARKET_DATA = {pair: {} for pair in PAIRS}
 markets_loaded = {}
 
 # Dicionário para gerenciar o cooldown dos alertas
+# A chave será uma string única para cada oportunidade de arbitragem (ex: 'LTC/USDT-binance-bybit')
 last_alert_times = {}
 COOLDOWN_SECONDS = 300 # Define o intervalo de cooldown em segundos (300s = 5 minutos)
 
 async def check_arbitrage_opportunities(application):
     """
-    Função que checa oportunidades de arbitragem em loop com validação aprimorada.
+    Função que checa oportunidades de arbitragem em loop.
     """
     bot = application.bot
     while True:
@@ -89,7 +73,7 @@ async def check_arbitrage_opportunities(application):
             lucro_minimo = application.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)
             trade_amount_usd = application.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD)
             fee = application.bot_data.get('fee_percentage', DEFAULT_FEE_PERCENTAGE) / 100.0
-            
+
             for pair in PAIRS:
                 market_data = GLOBAL_MARKET_DATA[pair]
                 if len(market_data) < 2:
@@ -126,57 +110,36 @@ async def check_arbitrage_opportunities(application):
                 net_profit_percentage = gross_profit_percentage - (2 * fee * 100)
                 
                 if net_profit_percentage >= lucro_minimo:
-                    # --- Checagem de Confirmação ---
-                    try:
-                        buy_exchange_rest = getattr(ccxt, buy_ex_id)()
-                        sell_exchange_rest = getattr(ccxt, sell_ex_id)()
-                        
-                        ticker_buy = await buy_exchange_rest.fetch_ticker(pair)
-                        ticker_sell = await sell_exchange_rest.fetch_ticker(pair)
-                        
-                        confirmed_buy_price = ticker_buy['ask']
-                        confirmed_sell_price = ticker_sell['bid']
-                        
-                        await buy_exchange_rest.close()
-                        await sell_exchange_rest.close()
-                        
-                        confirmed_gross_profit = (confirmed_sell_price - confirmed_buy_price) / confirmed_buy_price
-                        confirmed_gross_profit_percentage = confirmed_gross_profit * 100
-                        confirmed_net_profit_percentage = confirmed_gross_profit_percentage - (2 * fee * 100)
+                    required_buy_volume = trade_amount_usd / best_buy_price
+                    required_sell_volume = trade_amount_usd / best_sell_price
 
-                        if confirmed_net_profit_percentage >= lucro_minimo:
-                            required_buy_volume = trade_amount_usd / confirmed_buy_price
-                            required_sell_volume = trade_amount_usd / confirmed_sell_price
+                    buy_volume = buy_data.get('ask_volume', 0) if buy_data.get('ask_volume') is not None else 0
+                    sell_volume = sell_data.get('bid_volume', 0) if sell_data.get('bid_volume') is not None else 0
 
-                            confirmed_buy_volume = ticker_buy['askVolume'] if ticker_buy['askVolume'] is not None else 0
-                            confirmed_sell_volume = ticker_sell['bidVolume'] if ticker_sell['bidVolume'] is not None else 0
+                    has_sufficient_liquidity = (
+                        buy_volume >= required_buy_volume and
+                        sell_volume >= required_sell_volume
+                    )
 
-                            has_sufficient_liquidity = (
-                                confirmed_buy_volume >= required_buy_volume and
-                                confirmed_sell_volume >= required_sell_volume
-                            )
-
-                            if has_sufficient_liquidity:
-                                arbitrage_key = f"{pair}-{buy_ex_id}-{sell_ex_id}"
-                                current_time = time.time()
-                                
-                                if arbitrage_key in last_alert_times and (current_time - last_alert_times[arbitrage_key]) < COOLDOWN_SECONDS:
-                                    logger.debug(f"Alerta para {arbitrage_key} em cooldown. Ignorando.")
-                                    continue
-                                
-                                msg = (f"💰 Arbitragem para {pair}!\n"
-                                    f"Compre em {buy_ex_id}: {confirmed_buy_price:.8f}\n"
-                                    f"Venda em {sell_ex_id}: {confirmed_sell_price:.8f}\n"
-                                    f"Lucro Líquido: {confirmed_net_profit_percentage:.2f}%\n"
-                                    f"Volume: ${trade_amount_usd:.2f}"
-                                )
-                                logger.info(msg)
-                                await bot.send_message(chat_id=chat_id, text=msg)
-                                last_alert_times[arbitrage_key] = current_time
-                        else:
-                             logger.debug(f"Oportunidade para {pair} falhou na confirmação. Lucro Líquido confirmado: {confirmed_net_profit_percentage:.2f}%")
-                    except Exception as e:
-                        logger.error(f"Erro na checagem de confirmação para {pair}: {e}")
+                    if has_sufficient_liquidity:
+                        # --- Lógica de Cooldown ---
+                        arbitrage_key = f"{pair}-{buy_ex_id}-{sell_ex_id}"
+                        current_time = time.time()
+                        
+                        if arbitrage_key in last_alert_times and (current_time - last_alert_times[arbitrage_key]) < COOLDOWN_SECONDS:
+                            logger.debug(f"Alerta para {arbitrage_key} em cooldown. Ignorando.")
+                            continue
+                        
+                        # Se não estiver em cooldown, envia o alerta
+                        msg = (f"💰 Arbitragem para {pair}!\n"
+                            f"Compre em {buy_ex_id}: {best_buy_price:.8f}\n"
+                            f"Venda em {sell_ex_id}: {best_sell_price:.8f}\n"
+                            f"Lucro Líquido: {net_profit_percentage:.2f}%\n"
+                            f"Volume: ${trade_amount_usd:.2f}"
+                        )
+                        logger.info(msg)
+                        await bot.send_message(chat_id=chat_id, text=msg)
+                        last_alert_times[arbitrage_key] = current_time
                 else:
                     logger.debug(f"Oportunidade para {pair}: Lucro Líquido {net_profit_percentage:.2f}% (abaixo do mínimo de {lucro_minimo:.2f}%)")
 
@@ -323,6 +286,9 @@ async def main():
     logger.info("Bot iniciado com sucesso e aguardando mensagens...")
 
     try:
+        # A nova abordagem para rodar tarefas em background.
+        # Criamos as tarefas e agendamos para rodar, permitindo que o polling do Telegram
+        # aconteça no loop principal.
         asyncio.create_task(watch_all_exchanges())
         asyncio.create_task(check_arbitrage_opportunities(application))
         
@@ -336,4 +302,4 @@ async def main():
         await asyncio.gather(*tasks, return_exceptions=True)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main()) 
