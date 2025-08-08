@@ -25,7 +25,7 @@ MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0
 # Exchanges confiáveis (13)
 EXCHANGES_LIST = [
     'binance', 'coinbase', 'kraken', 'kucoin', 'okx', 'bybit',
-    'bitfinex', 'gate', 'bitstamp', 'crypto_com', 'huobi', 'mexc', 'bitget'
+    'bitfinex', 'gate', 'bitstamp', 'cryptocom', 'huobi', 'mexc', 'bitget'
 ]
 
 # Lista fixa das 100 moedas principais (você pode ajustar)
