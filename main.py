@@ -55,6 +55,9 @@ markets_loaded = {}
 
 
 async def check_arbitrage_opportunities(application):
+    """
+    Função que checa oportunidades de arbitragem em loop.
+    """
     bot = application.bot
     while True:
         try:
@@ -151,15 +154,8 @@ async def watch_order_book_for_pair(exchange, pair, ex_id):
                 'ask': best_ask,
                 'ask_volume': best_ask_volume
             }
-        except (ccxt.NetworkError, ccxt.ExchangeError) as e:
-            logger.error(f"Erro na conexão WebSocket para {pair} em {ex_id}: {e}")
-            await asyncio.sleep(5)  # espera para reconectar
-        except AttributeError as e:
-            # Tratamento do erro '_buffer' do ccxt
-            logger.error(f"Erro interno do WebSocket (AttributeError) para {pair} em {ex_id}: {e}")
-            await asyncio.sleep(5)  # espera para reconectar
         except Exception as e:
-            logger.error(f"Erro inesperado no WebSocket para {pair} em {ex_id}: {e}")
+            logger.error(f"Erro no WebSocket para {pair} em {ex_id}: {e}. Tentando reconectar em 5 segundos...")
             await asyncio.sleep(5)
 
 
@@ -219,42 +215,3 @@ async def setlucro(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.bot_data['lucro_minimo_porcentagem'] = valor
         await update.message.reply_text(f"Lucro mínimo atualizado para {valor:.2f}%")
         logger.info(f"Lucro mínimo definido para {valor}% por {update.message.chat_id}")
-    except (IndexError, ValueError):
-        await update.message.reply_text("Uso incorreto. Exemplo: /setlucro 2.5")
-
-async def setvolume(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        valor = float(context.args[0])
-        if valor <= 0:
-            await update.message.reply_text("O volume de trade deve ser um valor positivo.")
-            return
-        context.bot_data['trade_amount_usd'] = valor
-        await update.message.reply_text(f"Volume de trade para checagem de liquidez atualizado para ${valor:.2f} USD")
-        logger.info(f"Volume de trade definido para ${valor} por {update.message.chat_id}")
-    except (IndexError, ValueError):
-        await update.message.reply_text("Uso incorreto. Exemplo: /setvolume 100")
-
-async def setfee(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        valor = float(context.args[0])
-        if valor < 0:
-            await update.message.reply_text("A taxa de negociação não pode ser negativa.")
-            return
-        context.bot_data['fee_percentage'] = valor
-        await update.message.reply_text(f"Taxa de negociação por lado atualizada para {valor:.3f}%")
-        logger.info(f"Taxa de negociação definida para {valor}% por {update.message.chat_id}")
-    except (IndexError, ValueError):
-        await update.message.reply_text("Uso incorreto. Exemplo: /setfee 0.075")
-
-async def stop_arbitrage(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.bot_data['admin_chat_id'] = None
-    await update.message.reply_text("Alertas desativados. Use /start para reativar.")
-    logger.info(f"Alertas de arbitragem desativados por {update.message.chat_id}")
-
-async def main():
-    application = ApplicationBuilder().token(TOKEN).build()
-    
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("setlucro", setlucro))
-    application.add_handler(CommandHandler("setvolume", setvolume))
-    application.add
