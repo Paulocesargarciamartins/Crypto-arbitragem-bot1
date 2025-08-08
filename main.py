@@ -54,6 +54,72 @@ GLOBAL_MARKET_DATA_LOCK = asyncio.Lock()
 # Telegram bot
 bot = None
 
+# --- FUNÇÕES DE HANDLER DO TELEGRAM ---
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.bot_data['admin_chat_id'] = update.message.chat_id
+    await update.message.reply_text(
+        "Olá! Bot de Arbitragem Ativado (Modo WebSocket).\n"
+        "Monitorando oportunidades de arbitragem em tempo real.\n"
+        f"Lucro mínimo atual: {context.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)}%\n"
+        f"Volume de trade para liquidez: ${context.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD):.2f}\n"
+        f"Taxa de negociação por lado: {context.bot_data.get('fee_percentage', DEFAULT_FEE_PERCENTAGE)}%\n\n"
+        "Use /setlucro <valor> para definir o lucro mínimo em %.\n"
+        "Exemplo: /setlucro 3\n\n"
+        "Use /setvolume <valor> para definir o volume de trade em USD para checagem de liquidez.\n"
+        "Exemplo: /setvolume 100\n\n"
+        "Use /setfee <valor> para definir a taxa de negociação por lado em %.\n"
+        "Exemplo: /setfee 0.075\n\n"
+        "Use /stop para parar de receber alertas."
+    )
+    logger.warning(f"Bot iniciado por chat_id: {update.message.chat_id}")
+
+
+async def setlucro(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        valor = float(context.args[0])
+        if valor < 0:
+            await update.message.reply_text("O lucro mínimo não pode ser negativo.")
+            return
+        context.bot_data['lucro_minimo_porcentagem'] = valor
+        await update.message.reply_text(f"Lucro mínimo atualizado para {valor:.2f}%")
+        logger.warning(f"Lucro mínimo definido para {valor}% por {update.message.chat_id}")
+    except (IndexError, ValueError):
+        await update.message.reply_text("Uso incorreto. Exemplo: /setlucro 2.5")
+
+
+async def setvolume(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        valor = float(context.args[0])
+        if valor <= 0:
+            await update.message.reply_text("O volume de trade deve ser um valor positivo.")
+            return
+        context.bot_data['trade_amount_usd'] = valor
+        await update.message.reply_text(f"Volume de trade para checagem de liquidez atualizado para ${valor:.2f} USD")
+        logger.warning(f"Volume de trade definido para ${valor} por {update.message.chat_id}")
+    except (IndexError, ValueError):
+        await update.message.reply_text("Uso incorreto. Exemplo: /setvolume 100")
+
+
+async def setfee(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        valor = float(context.args[0])
+        if valor < 0:
+            await update.message.reply_text("A taxa de negociação não pode ser negativa.")
+            return
+        context.bot_data['fee_percentage'] = valor
+        await update.message.reply_text(f"Taxa de negociação por lado atualizada para {valor:.3f}%")
+        logger.warning(f"Taxa de negociação definida para {valor}% por {update.message.chat_id}")
+    except (IndexError, ValueError):
+        await update.message.reply_text("Uso incorreto. Exemplo: /setfee 0.075")
+
+
+async def stop_arbitrage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.bot_data['admin_chat_id'] = None
+    await update.message.reply_text("Alertas desativados. Use /start para reativar.")
+    logger.warning(f"Alertas de arbitragem desativados por {update.message.chat_id}")
+
+# --- FUNÇÕES DE LÓGICA DO BOT ---
 
 async def check_arbitrage_opportunities(application):
     bot = application.bot
