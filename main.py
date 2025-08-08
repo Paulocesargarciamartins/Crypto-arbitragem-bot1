@@ -252,4 +252,28 @@ async def stop_arbitrage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.warning(f"Alertas de arbitragem desativados por {update.message.chat_id}")
 
 
-async def main
+async def main():
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("setlucro", setlucro))
+    app.add_handler(CommandHandler("setvolume", setvolume))
+    app.add_handler(CommandHandler("setfee", setfee))
+    app.add_handler(CommandHandler("stop", stop_arbitrage))
+
+    # Criação da tarefa de verificação de arbitragem e do loop de eventos
+    arbitrage_task = asyncio.create_task(check_arbitrage_opportunities(app))
+    
+    # Inicia os WebSockets e o bot
+    await asyncio.gather(
+        watch_all_exchanges(),
+        app.run_polling()
+    )
+
+
+if __name__ == '__main__':
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.warning("Bot desligado manualmente.")
+    except Exception as e:
+        logger.error(f"Erro fatal no loop principal: {e}", exc_info=True)
