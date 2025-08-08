@@ -5,9 +5,6 @@ from telegram import Update, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import ccxt.pro as ccxt
 
-# Remova o nest_asyncio.apply() daqui.
-# O Heroku já tem seu próprio loop de eventos.
-
 # --- Configurações básicas ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 DEFAULT_LUCRO_MINIMO_PORCENTAGEM = 2.0
@@ -15,13 +12,13 @@ DEFAULT_TRADE_AMOUNT_USD = 50.0
 DEFAULT_FEE_PERCENTAGE = 0.1
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0
 
-# Exchanges confiáveis para monitorar (BITFINEX REMOVIDA)
+# Exchanges confiáveis para monitorar
 EXCHANGES_LIST = [
     'binance', 'coinbase', 'kraken', 'okx', 'bybit',
     'kucoin', 'bitstamp', 'bitget', 'mexc'
 ]
 
-# Pares USDT - OTIMIZADA para o plano Eco Dynos (50 principais moedas)
+# Pares USDT (50 principais moedas)
 PAIRS = [
     "BTC/USDT", "ETH/USDT", "XRP/USDT", "USDT/USDT", "BNB/USDT", "SOL/USDT",
     "USDC/USDT", "TRX/USDT", "DOGE/USDT", "ADA/USDT", "WBTC/USDT", "STETH/USDT",
@@ -45,11 +42,9 @@ global_exchanges_instances = {}
 GLOBAL_MARKET_DATA = {pair: {} for pair in PAIRS}
 markets_loaded = {}
 
+# --- FUNÇÕES DE LÓGICA DO BOT ---
 
 async def check_arbitrage_opportunities(application):
-    """
-    Função que checa oportunidades de arbitragem em loop.
-    """
     bot = application.bot
     while True:
         try:
@@ -131,9 +126,6 @@ async def check_arbitrage_opportunities(application):
 
 
 async def watch_order_book_for_pair(exchange, pair, ex_id):
-    """
-    Função que apenas atualiza os dados de mercado.
-    """
     try:
         while True:
             order_book = await exchange.watch_order_book(pair)
@@ -187,6 +179,8 @@ async def watch_all_exchanges():
     
     logger.info("Iniciando WebSockets para todas as exchanges e pares válidos...")
     await asyncio.gather(*tasks, return_exceptions=True)
+
+# --- FUNÇÕES DE HANDLER DO TELEGRAM ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.bot_data['admin_chat_id'] = update.message.chat_id
@@ -247,7 +241,10 @@ async def stop_arbitrage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Alertas desativados. Use /start para reativar.")
     logger.info(f"Alertas de arbitragem desativados por {update.message.chat_id}")
 
+
 async def main():
+    await asyncio.sleep(1) # Pausa para garantir que o Heroku inicie o loop de eventos
+
     application = ApplicationBuilder().token(TOKEN).build()
     
     application.add_handler(CommandHandler("start", start))
@@ -267,9 +264,6 @@ async def main():
     logger.info("Bot iniciado com sucesso e aguardando mensagens...")
 
     try:
-        # A nova abordagem para rodar tarefas em background.
-        # Criamos as tarefas e agendamos para rodar, permitindo que o polling do Telegram
-        # aconteça no loop principal.
         asyncio.create_task(watch_all_exchanges())
         asyncio.create_task(check_arbitrage_opportunities(application))
         
@@ -281,3 +275,7 @@ async def main():
         logger.info("Fechando conexões das exchanges...")
         tasks = [ex.close() for ex in global_exchanges_instances.values()]
         await asyncio.gather(*tasks, return_exceptions=True)
+
+# A linha `if __name__ == "__main__":` e `asyncio.run(main())` foi removida.
+# Heroku agora irá chamar `main()` diretamente.
+
