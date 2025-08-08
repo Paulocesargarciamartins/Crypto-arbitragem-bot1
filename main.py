@@ -107,26 +107,21 @@ async def check_arbitrage_opportunities(application):
                     continue
 
                 net_profit_percentage = gross_profit_percentage - (2 * fee * 100)
-                
+
+                # FILTRO CORRIGIDO: aceita TODO lucro >= lucro_minimo, sem limite superior
                 if net_profit_percentage >= lucro_minimo:
                     required_buy_volume = trade_amount_usd / best_buy_price
                     required_sell_volume = trade_amount_usd / best_sell_price
 
-                    buy_volume = buy_data.get('ask_volume', 0) if buy_data.get('ask_volume') is not None else 0
-                    sell_volume = sell_data.get('bid_volume', 0) if sell_data.get('bid_volume') is not None else 0
+                    buy_volume = buy_data.get('ask_volume', 0) or 0
+                    sell_volume = sell_data.get('bid_volume', 0) or 0
 
-                    has_sufficient_liquidity = (
-                        buy_volume >= required_buy_volume and
-                        sell_volume >= required_sell_volume
-                    )
-
-                    if has_sufficient_liquidity:
+                    if buy_volume >= required_buy_volume and sell_volume >= required_sell_volume:
                         msg = (f"💰 Arbitragem para {pair}!\n"
-                            f"Compre em {buy_ex_id}: {best_buy_price:.8f}\n"
-                            f"Venda em {sell_ex_id}: {best_sell_price:.8f}\n"
-                            f"Lucro Líquido: {net_profit_percentage:.2f}%\n"
-                            f"Volume: ${trade_amount_usd:.2f}"
-                        )
+                               f"Compre em {buy_ex_id}: {best_buy_price:.8f}\n"
+                               f"Venda em {sell_ex_id}: {best_sell_price:.8f}\n"
+                               f"Lucro Líquido: {net_profit_percentage:.2f}%\n"
+                               f"Volume: ${trade_amount_usd:.2f}")
                         logger.info(msg)
                         await bot.send_message(chat_id=chat_id, text=msg)
                 else:
@@ -275,9 +270,6 @@ async def main():
     logger.info("Bot iniciado com sucesso e aguardando mensagens...")
 
     try:
-        # A nova abordagem para rodar tarefas em background.
-        # Criamos as tarefas e agendamos para rodar, permitindo que o polling do Telegram
-        # aconteça no loop principal.
         asyncio.create_task(watch_all_exchanges())
         asyncio.create_task(check_arbitrage_opportunities(application))
         
