@@ -18,14 +18,13 @@ DEFAULT_FEE_PERCENTAGE = 0.1
 # Limite máximo de lucro bruto para validação de dados.
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0
 
-# Exchanges confiáveis para monitorar (13 melhores)
+# Exchanges confiáveis para monitorar (BITFINEX REMOVIDA)
 EXCHANGES_LIST = [
     'binance', 'coinbase', 'kraken', 'okx', 'bybit',
-    'kucoin', 'bitget', 'mexc', 'gateio', 'huobi',
-    'bitfinex', 'phemex', 'gemini'
+    'kucoin', 'bitstamp', 'bitget', 'mexc'
 ]
 
-# Pares USDT - OTIMIZADA para 110 principais moedas
+# Pares USDT - OTIMIZADA para 80 principais moedas
 PAIRS = [
     "BTC/USDT", "ETH/USDT", "XRP/USDT", "USDT/USDT", "BNB/USDT", "SOL/USDT",
     "USDC/USDT", "TRX/USDT", "DOGE/USDT", "ADA/USDT", "WBTC/USDT", "STETH/USDT",
@@ -35,17 +34,12 @@ PAIRS = [
     "TAO/USDT", "NEAR/USDT", "ETC/USDT", "MNT/USDT", "ONDO/USDT", "APT/USDT",
     "ICP/USDT", "JITOSOL/USDT", "KAS/USDT", "PENGU/USDT", "ALGO/USDT", "ARB/USDT",
     "POL/USDT", "ATOM/USDT", "BONK/USDT", "WBETH/USDT", "RENDER/USDT", "WLD/USDT",
-    "STORY/USDT", "TRUMP/USDT", "MATIC/USDT", "ICP/USDT", "OP/USDT", "IMX/USDT",
-    "TIA/USDT", "INJ/USDT", "RNDR/USDT", "PYTH/USDT", "STRK/USDT", "MANTLE/USDT",
-    "WIF/USDT", "JUP/USDT", "FET/USDT", "STX/USDT", "GRT/USDT", "LDO/USDT",
-    "UNI/USDT", "EGLD/USDT", "AAVE/USDT", "FLOW/USDT", "FTM/USDT", "ZEC/USDT",
+    "STORY/USDT", "TRUMP/USDT", "MATIC/USDT", "OP/USDT", "IMX/USDT", "TIA/USDT",
+    "INJ/USDT", "PYTH/USDT", "STRK/USDT", "MANTLE/USDT", "WIF/USDT", "JUP/USDT",
+    "FET/USDT", "STX/USDT", "GRT/USDT", "LDO/USDT", "FLOW/USDT", "FTM/USDT",
     "SAND/USDT", "MANA/USDT", "GALA/USDT", "AXS/USDT", "ENJ/USDT", "CHZ/USDT",
-    "THETA/USDT", "EOS/USDT", "MKR/USDT", "CETH/USDT", "CRV/USDT", "BAT/USDT",
-    "COMP/USDT", "SUSHI/USDT", "1INCH/USDT", "YFI/USDT", "OMG/USDT", "KNC/USDT",
-    "BAND/USDT", "RLC/USDT", "OCEAN/USDT", "NMR/USDT", "SNX/USDT", "ZRX/USDT",
-    "CELO/USDT", "SKL/USDT", "ANKR/USDT", "RVN/USDT", "DODO/USDT", "BAL/USDT",
-    "BTT/USDT", "WIN/USDT", "HOT/USDT", "VET/USDT", "XEM/USDT", "TFUEL/USDT",
-    "OMG/USDT", "QTUM/USDT", "KAVA/USDT", "AVAX/USDT", "DOT/USDT", "SHIB/USDT"
+    "THETA/USDT", "EOS/USDT", "MKR/USDT", "CRV/USDT", "BAT/USDT", "COMP/USDT",
+    "SUSHI/USDT", "1INCH/USDT", "YFI/USDT", "KNC/USDT", "BAND/USDT", "RLC/USDT"
 ]
 
 # Configuração de logging
