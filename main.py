@@ -19,11 +19,11 @@ DEFAULT_FEE_PERCENTAGE = 0.1
 # Limite máximo de lucro bruto para validação de dados.
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0
 
-# Exchanges confiáveis para monitorar (12 exchanges)
+# Exchanges confiáveis para monitorar
 EXCHANGES_LIST = [
     'binance', 'coinbase', 'kraken', 'okx', 'bybit',
     'kucoin', 'bitstamp', 'bitget', 'gateio', 'bitfinex',
-    'huobi', 'phemex'
+    'phemex'
 ]
 
 # Pares USDT - 100 principais moedas por capitalização de mercado.
@@ -47,10 +47,10 @@ PAIRS = [
     "WOO/USDT", "OM/USDT", "ZETA/USDT", "DASH/USDT",
 ]
 
-# Configuração de logging
+# Configuração de logging - ALTERADO PARA MOSTRAR APENAS AVISOS E ERROS
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.WARNING
 )
 logger = logging.getLogger(__name__)
 
@@ -74,8 +74,6 @@ async def check_arbitrage_opportunities(application):
                 logger.warning("Nenhum chat_id de administrador definido. O bot não enviará alertas.")
                 await asyncio.sleep(5)
                 continue
-
-            logger.info("Executando checagem de arbitragem...")
 
             lucro_minimo = application.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)
             trade_amount_usd = application.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD)
@@ -113,16 +111,10 @@ async def check_arbitrage_opportunities(application):
                 net_profit_percentage = gross_profit_percentage - (2 * fee * 100)
                 
                 if net_profit_percentage >= lucro_minimo:
-                    # --- DESABILITADO: Checagem de Confirmação Rápida ---
-                    # Esta parte do código foi desabilitada para teste
-                    # O bot agora confia nos dados do WebSocket para enviar o alerta
-                    # Para reativar, descomente o bloco de código abaixo
-                    
                     arbitrage_key = f"{pair}-{buy_ex_id}-{sell_ex_id}"
                     current_time = time.time()
                     
                     if arbitrage_key in last_alert_times and (current_time - last_alert_times[arbitrage_key]) < COOLDOWN_SECONDS:
-                        logger.debug(f"Alerta para {arbitrage_key} em cooldown. Ignorando.")
                         continue
                     
                     msg = (f"💰 Arbitragem para {pair}!\n"
@@ -134,9 +126,6 @@ async def check_arbitrage_opportunities(application):
                     logger.info(msg)
                     await bot.send_message(chat_id=chat_id, text=msg)
                     last_alert_times[arbitrage_key] = current_time
-                else:
-                    logger.debug(f"Oportunidade para {pair}: Lucro Líquido {net_profit_percentage:.2f}% (abaixo do mínimo de {lucro_minimo:.2f}%)")
-
         except Exception as e:
             logger.error(f"Erro na checagem de arbitragem: {e}", exc_info=True)
         
@@ -183,10 +172,8 @@ async def watch_all_exchanges():
         global_exchanges_instances[ex_id] = exchange
         
         try:
-            logger.info(f"Carregando mercados para {ex_id}...")
             await exchange.load_markets()
             markets_loaded[ex_id] = True
-            logger.info(f"Mercados de {ex_id} carregados. Total de pares: {len(exchange.markets)}")
 
             for pair in PAIRS:
                 if pair in exchange.markets:
@@ -198,7 +185,6 @@ async def watch_all_exchanges():
         except Exception as e:
             logger.error(f"ERRO ao carregar mercados de {ex_id}: {e}")
     
-    logger.info("Iniciando WebSockets para todas as exchanges e pares válidos...")
     await asyncio.gather(*tasks, return_exceptions=True)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
