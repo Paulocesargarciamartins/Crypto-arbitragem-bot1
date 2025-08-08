@@ -1,24 +1,30 @@
 import asyncio
 import logging
-import os
 from telegram import Update, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import ccxt.pro as ccxt
+import os
+import nest_asyncio
+
+# Aplica o patch para permitir loops aninhados
+nest_asyncio.apply()
 
 # --- Configurações básicas ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 DEFAULT_LUCRO_MINIMO_PORCENTAGEM = 2.0
 DEFAULT_TRADE_AMOUNT_USD = 50.0
 DEFAULT_FEE_PERCENTAGE = 0.1
+
+# Limite máximo de lucro bruto para validação de dados.
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0
 
-# Exchanges confiáveis para monitorar
+# Exchanges confiáveis para monitorar (BITFINEX REMOVIDA)
 EXCHANGES_LIST = [
     'binance', 'coinbase', 'kraken', 'okx', 'bybit',
     'kucoin', 'bitstamp', 'bitget', 'mexc'
 ]
 
-# Pares USDT (50 principais moedas)
+# Pares USDT - OTIMIZADA para o plano Eco Dynos (50 principais moedas)
 PAIRS = [
     "BTC/USDT", "ETH/USDT", "XRP/USDT", "USDT/USDT", "BNB/USDT", "SOL/USDT",
     "USDC/USDT", "TRX/USDT", "DOGE/USDT", "ADA/USDT", "WBTC/USDT", "STETH/USDT",
@@ -42,9 +48,11 @@ global_exchanges_instances = {}
 GLOBAL_MARKET_DATA = {pair: {} for pair in PAIRS}
 markets_loaded = {}
 
-# --- FUNÇÕES DE LÓGICA DO BOT ---
 
 async def check_arbitrage_opportunities(application):
+    """
+    Função que checa oportunidades de arbitragem em loop.
+    """
     bot = application.bot
     while True:
         try:
@@ -74,12 +82,12 @@ async def check_arbitrage_opportunities(application):
                 sell_data = None
 
                 for ex_id, data in market_data.items():
-                    if data.get('ask') is not None and data['ask'] > 0 and data['ask'] < best_buy_price:
+                    if data.get('ask') is not None and data['ask'] < best_buy_price:
                         best_buy_price = data['ask']
                         buy_ex_id = ex_id
                         buy_data = data
                     
-                    if data.get('bid') is not None and data['bid'] > 0 and data['bid'] > best_sell_price:
+                    if data.get('bid') is not None and data['bid'] > best_sell_price:
                         best_sell_price = data['bid']
                         sell_ex_id = ex_id
                         sell_data = data
@@ -87,9 +95,6 @@ async def check_arbitrage_opportunities(application):
                 if not buy_ex_id or not sell_ex_id or buy_ex_id == sell_ex_id:
                     continue
                 
-                if best_buy_price <= 0 or best_sell_price <= 0:
-                    continue
-
                 gross_profit = (best_sell_price - best_buy_price) / best_buy_price
                 gross_profit_percentage = gross_profit * 100
 
@@ -120,7 +125,7 @@ async def check_arbitrage_opportunities(application):
                         logger.info(msg)
                         await bot.send_message(chat_id=chat_id, text=msg)
                 else:
-                    logger.info(f"Oportunidade para {pair}: Lucro Líquido {net_profit_percentage:.2f}%. Melhor compra em {buy_ex_id} e melhor venda em {sell_ex_id}. Oportunidade não gera alerta (abaixo de {lucro_minimo:.2f}%)")
+                    logger.debug(f"Oportunidade para {pair}: Lucro Líquido {net_profit_percentage:.2f}% (abaixo do mínimo de {lucro_minimo:.2f}%)")
 
         except Exception as e:
             logger.error(f"Erro na checagem de arbitragem: {e}", exc_info=True)
@@ -129,6 +134,9 @@ async def check_arbitrage_opportunities(application):
 
 
 async def watch_order_book_for_pair(exchange, pair, ex_id):
+    """
+    Função que apenas atualiza os dados de mercado.
+    """
     try:
         while True:
             order_book = await exchange.watch_order_book(pair)
@@ -182,8 +190,6 @@ async def watch_all_exchanges():
     
     logger.info("Iniciando WebSockets para todas as exchanges e pares válidos...")
     await asyncio.gather(*tasks, return_exceptions=True)
-
-# --- FUNÇÕES DE HANDLER DO TELEGRAM ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.bot_data['admin_chat_id'] = update.message.chat_id
@@ -244,7 +250,6 @@ async def stop_arbitrage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Alertas desativados. Use /start para reativar.")
     logger.info(f"Alertas de arbitragem desativados por {update.message.chat_id}")
 
-
 async def main():
     application = ApplicationBuilder().token(TOKEN).build()
     
@@ -265,6 +270,9 @@ async def main():
     logger.info("Bot iniciado com sucesso e aguardando mensagens...")
 
     try:
+        # A nova abordagem para rodar tarefas em background.
+        # Criamos as tarefas e agendamos para rodar, permitindo que o polling do Telegram
+        # aconteça no loop principal.
         asyncio.create_task(watch_all_exchanges())
         asyncio.create_task(check_arbitrage_opportunities(application))
         
@@ -276,3 +284,6 @@ async def main():
         logger.info("Fechando conexões das exchanges...")
         tasks = [ex.close() for ex in global_exchanges_instances.values()]
         await asyncio.gather(*tasks, return_exceptions=True)
+
+if __name__ == "__main__":
+    asyncio.run(main())
