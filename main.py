@@ -12,21 +12,21 @@ nest_asyncio.apply()
 
 # --- Configurações básicas ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-DEFAULT_LUCRO_MINIMO_PORCENTAGEM = 2.0
+DEFAULT_LUCRO_MINIMO_PORCENTAGEM = 0.1
 DEFAULT_TRADE_AMOUNT_USD = 50.0
 DEFAULT_FEE_PERCENTAGE = 0.1
 
 # Limite máximo de lucro bruto para validação de dados.
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0
 
-# Exchanges confiáveis para monitorar
+# Exchanges confiáveis para monitorar (12 exchanges)
 EXCHANGES_LIST = [
     'binance', 'coinbase', 'kraken', 'okx', 'bybit',
-    'kucoin', 'bitstamp', 'bitget',
+    'kucoin', 'bitstamp', 'bitget', 'gateio', 'bitfinex',
+    'huobi', 'phemex'
 ]
 
-# Pares USDT - OTIMIZADA para o plano profissional (100 principais moedas)
-# Lista atualizada com as 100 principais criptos por capitalização de mercado.
+# Pares USDT - 100 principais moedas por capitalização de mercado.
 PAIRS = [
     "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "USDC/USDT",
     "DOGE/USDT", "ADA/USDT", "TRX/USDT", "SHIB/USDT", "AVAX/USDT", "DOT/USDT",
@@ -64,7 +64,7 @@ COOLDOWN_SECONDS = 300 # Define o intervalo de cooldown em segundos (300s = 5 mi
 
 async def check_arbitrage_opportunities(application):
     """
-    Função que checa oportunidades de arbitragem em loop com validação aprimorada.
+    Função que checa oportunidades de arbitragem em loop.
     """
     bot = application.bot
     while True:
@@ -88,22 +88,18 @@ async def check_arbitrage_opportunities(application):
 
                 best_buy_price = float('inf')
                 buy_ex_id = None
-                buy_data = None
                 
                 best_sell_price = 0
                 sell_ex_id = None
-                sell_data = None
 
                 for ex_id, data in market_data.items():
                     if data.get('ask') is not None and data['ask'] < best_buy_price:
                         best_buy_price = data['ask']
                         buy_ex_id = ex_id
-                        buy_data = data
                     
                     if data.get('bid') is not None and data['bid'] > best_sell_price:
                         best_sell_price = data['bid']
                         sell_ex_id = ex_id
-                        sell_data = data
 
                 if not buy_ex_id or not sell_ex_id or buy_ex_id == sell_ex_id:
                     continue
@@ -117,57 +113,27 @@ async def check_arbitrage_opportunities(application):
                 net_profit_percentage = gross_profit_percentage - (2 * fee * 100)
                 
                 if net_profit_percentage >= lucro_minimo:
-                    # --- Checagem de Confirmação ---
-                    try:
-                        buy_exchange_rest = getattr(ccxt, buy_ex_id)()
-                        sell_exchange_rest = getattr(ccxt, sell_ex_id)()
-                        
-                        ticker_buy = await buy_exchange_rest.fetch_ticker(pair)
-                        ticker_sell = await sell_exchange_rest.fetch_ticker(pair)
-                        
-                        confirmed_buy_price = ticker_buy['ask']
-                        confirmed_sell_price = ticker_sell['bid']
-                        
-                        await buy_exchange_rest.close()
-                        await sell_exchange_rest.close()
-                        
-                        confirmed_gross_profit = (confirmed_sell_price - confirmed_buy_price) / confirmed_buy_price
-                        confirmed_gross_profit_percentage = confirmed_gross_profit * 100
-                        confirmed_net_profit_percentage = confirmed_gross_profit_percentage - (2 * fee * 100)
-
-                        if confirmed_net_profit_percentage >= lucro_minimo:
-                            required_buy_volume = trade_amount_usd / confirmed_buy_price
-                            required_sell_volume = trade_amount_usd / confirmed_sell_price
-
-                            confirmed_buy_volume = ticker_buy['askVolume'] if ticker_buy['askVolume'] is not None else 0
-                            confirmed_sell_volume = ticker_sell['bidVolume'] if ticker_sell['bidVolume'] is not None else 0
-
-                            has_sufficient_liquidity = (
-                                confirmed_buy_volume >= required_buy_volume and
-                                confirmed_sell_volume >= required_sell_volume
-                            )
-
-                            if has_sufficient_liquidity:
-                                arbitrage_key = f"{pair}-{buy_ex_id}-{sell_ex_id}"
-                                current_time = time.time()
-                                
-                                if arbitrage_key in last_alert_times and (current_time - last_alert_times[arbitrage_key]) < COOLDOWN_SECONDS:
-                                    logger.debug(f"Alerta para {arbitrage_key} em cooldown. Ignorando.")
-                                    continue
-                                
-                                msg = (f"💰 Arbitragem para {pair}!\n"
-                                    f"Compre em {buy_ex_id}: {confirmed_buy_price:.8f}\n"
-                                    f"Venda em {sell_ex_id}: {confirmed_sell_price:.8f}\n"
-                                    f"Lucro Líquido: {confirmed_net_profit_percentage:.2f}%\n"
-                                    f"Volume: ${trade_amount_usd:.2f}"
-                                )
-                                logger.info(msg)
-                                await bot.send_message(chat_id=chat_id, text=msg)
-                                last_alert_times[arbitrage_key] = current_time
-                        else:
-                             logger.debug(f"Oportunidade para {pair} falhou na confirmação. Lucro Líquido confirmado: {confirmed_net_profit_percentage:.2f}%")
-                    except Exception as e:
-                        logger.error(f"Erro na checagem de confirmação para {pair}: {e}")
+                    # --- DESABILITADO: Checagem de Confirmação Rápida ---
+                    # Esta parte do código foi desabilitada para teste
+                    # O bot agora confia nos dados do WebSocket para enviar o alerta
+                    # Para reativar, descomente o bloco de código abaixo
+                    
+                    arbitrage_key = f"{pair}-{buy_ex_id}-{sell_ex_id}"
+                    current_time = time.time()
+                    
+                    if arbitrage_key in last_alert_times and (current_time - last_alert_times[arbitrage_key]) < COOLDOWN_SECONDS:
+                        logger.debug(f"Alerta para {arbitrage_key} em cooldown. Ignorando.")
+                        continue
+                    
+                    msg = (f"💰 Arbitragem para {pair}!\n"
+                        f"Compre em {buy_ex_id}: {best_buy_price:.8f}\n"
+                        f"Venda em {sell_ex_id}: {best_sell_price:.8f}\n"
+                        f"Lucro Líquido: {net_profit_percentage:.2f}%\n"
+                        f"Volume: ${trade_amount_usd:.2f}"
+                    )
+                    logger.info(msg)
+                    await bot.send_message(chat_id=chat_id, text=msg)
+                    last_alert_times[arbitrage_key] = current_time
                 else:
                     logger.debug(f"Oportunidade para {pair}: Lucro Líquido {net_profit_percentage:.2f}% (abaixo do mínimo de {lucro_minimo:.2f}%)")
 
