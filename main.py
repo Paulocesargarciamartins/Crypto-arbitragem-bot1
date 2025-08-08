@@ -261,14 +261,20 @@ async def main():
     app.add_handler(CommandHandler("setfee", setfee))
     app.add_handler(CommandHandler("stop", stop_arbitrage))
 
-    # Cria e agenda a tarefa de verificação de arbitragem
-    app.add_startup_tasks(check_arbitrage_opportunities(app))
+    # Cria e agenda a tarefa de verificação de arbitragem usando run_once
+    app.job_queue.run_once(
+        lambda context: asyncio.create_task(check_arbitrage_opportunities(app)),
+        0
+    )
 
     # Cria e agenda as tarefas para todos os WebSockets
     for ex_id in EXCHANGES_LIST:
         for pair in PAIRS:
-            app.add_startup_tasks(
-                watch_order_book_for_pair_robust(None, pair, ex_id)
+            app.job_queue.run_once(
+                lambda context, ex_id=ex_id, pair=pair: asyncio.create_task(
+                    watch_order_book_for_pair_robust(None, pair, ex_id)
+                ),
+                0
             )
 
     logger.warning("Iniciando o bot de Telegram...")
