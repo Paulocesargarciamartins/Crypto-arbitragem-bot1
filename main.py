@@ -55,9 +55,6 @@ markets_loaded = {}
 
 
 async def check_arbitrage_opportunities(application):
-    """
-    Função que checa oportunidades de arbitragem em loop.
-    """
     bot = application.bot
     while True:
         try:
@@ -107,21 +104,26 @@ async def check_arbitrage_opportunities(application):
                     continue
 
                 net_profit_percentage = gross_profit_percentage - (2 * fee * 100)
-
-                # FILTRO CORRIGIDO: aceita TODO lucro >= lucro_minimo, sem limite superior
+                
                 if net_profit_percentage >= lucro_minimo:
                     required_buy_volume = trade_amount_usd / best_buy_price
                     required_sell_volume = trade_amount_usd / best_sell_price
 
-                    buy_volume = buy_data.get('ask_volume', 0) or 0
-                    sell_volume = sell_data.get('bid_volume', 0) or 0
+                    buy_volume = buy_data.get('ask_volume', 0) if buy_data.get('ask_volume') is not None else 0
+                    sell_volume = sell_data.get('bid_volume', 0) if sell_data.get('bid_volume') is not None else 0
 
-                    if buy_volume >= required_buy_volume and sell_volume >= required_sell_volume:
+                    has_sufficient_liquidity = (
+                        buy_volume >= required_buy_volume and
+                        sell_volume >= required_sell_volume
+                    )
+
+                    if has_sufficient_liquidity:
                         msg = (f"💰 Arbitragem para {pair}!\n"
-                               f"Compre em {buy_ex_id}: {best_buy_price:.8f}\n"
-                               f"Venda em {sell_ex_id}: {best_sell_price:.8f}\n"
-                               f"Lucro Líquido: {net_profit_percentage:.2f}%\n"
-                               f"Volume: ${trade_amount_usd:.2f}")
+                            f"Compre em {buy_ex_id}: {best_buy_price:.8f}\n"
+                            f"Venda em {sell_ex_id}: {best_sell_price:.8f}\n"
+                            f"Lucro Líquido: {net_profit_percentage:.2f}%\n"
+                            f"Volume: ${trade_amount_usd:.2f}"
+                        )
                         logger.info(msg)
                         await bot.send_message(chat_id=chat_id, text=msg)
                 else:
@@ -134,11 +136,8 @@ async def check_arbitrage_opportunities(application):
 
 
 async def watch_order_book_for_pair(exchange, pair, ex_id):
-    """
-    Função que apenas atualiza os dados de mercado.
-    """
-    try:
-        while True:
+    while True:
+        try:
             order_book = await exchange.watch_order_book(pair)
             
             best_bid = order_book['bids'][0][0] if order_book['bids'] else 0
@@ -152,14 +151,16 @@ async def watch_order_book_for_pair(exchange, pair, ex_id):
                 'ask': best_ask,
                 'ask_volume': best_ask_volume
             }
-    except ccxt.NetworkError as e:
-        logger.error(f"Erro de rede no WebSocket para {pair} em {ex_id}: {e}")
-    except ccxt.ExchangeError as e:
-        logger.error(f"Erro da exchange no WebSocket para {pair} em {ex_id}: {e}")
-    except Exception as e:
-        logger.error(f"Erro inesperado no WebSocket para {pair} em {ex_id}: {e}")
-    finally:
-        await exchange.close()
+        except (ccxt.NetworkError, ccxt.ExchangeError) as e:
+            logger.error(f"Erro na conexão WebSocket para {pair} em {ex_id}: {e}")
+            await asyncio.sleep(5)  # espera para reconectar
+        except AttributeError as e:
+            # Tratamento do erro '_buffer' do ccxt
+            logger.error(f"Erro interno do WebSocket (AttributeError) para {pair} em {ex_id}: {e}")
+            await asyncio.sleep(5)  # espera para reconectar
+        except Exception as e:
+            logger.error(f"Erro inesperado no WebSocket para {pair} em {ex_id}: {e}")
+            await asyncio.sleep(5)
 
 
 async def watch_all_exchanges():
@@ -256,31 +257,4 @@ async def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("setlucro", setlucro))
     application.add_handler(CommandHandler("setvolume", setvolume))
-    application.add_handler(CommandHandler("setfee", setfee))
-    application.add_handler(CommandHandler("stop", stop_arbitrage))
-    
-    await application.bot.set_my_commands([
-        BotCommand("start", "Iniciar o bot e ver configurações"),
-        BotCommand("setlucro", "Definir lucro mínimo em % (Ex: /setlucro 2.5)"),
-        BotCommand("setvolume", "Definir volume de trade em USD para liquidez (Ex: /setvolume 100)"),
-        BotCommand("setfee", "Definir taxa de negociação por lado em % (Ex: /setfee 0.075)"),
-        BotCommand("stop", "Parar de receber alertas")
-    ])
-
-    logger.info("Bot iniciado com sucesso e aguardando mensagens...")
-
-    try:
-        asyncio.create_task(watch_all_exchanges())
-        asyncio.create_task(check_arbitrage_opportunities(application))
-        
-        await application.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
-
-    except Exception as e:
-        logger.error(f"Erro no loop principal do bot: {e}", exc_info=True)
-    finally:
-        logger.info("Fechando conexões das exchanges...")
-        tasks = [ex.close() for ex in global_exchanges_instances.values()]
-        await asyncio.gather(*tasks, return_exceptions=True)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    application.add
