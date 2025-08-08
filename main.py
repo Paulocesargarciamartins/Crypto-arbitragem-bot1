@@ -4,7 +4,6 @@ import os
 from telegram import Update, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import ccxt.pro as ccxt
-import time
 
 # --- Configurações básicas ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -12,7 +11,6 @@ DEFAULT_LUCRO_MINIMO_PORCENTAGEM = 2.0
 DEFAULT_TRADE_AMOUNT_USD = 50.0
 DEFAULT_FEE_PERCENTAGE = 0.1
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0
-WEBSOCKET_TIMEOUT = 30  # Timeout em segundos para verificar se os dados estão desatualizados
 
 # Exchanges confiáveis para monitorar
 EXCHANGES_LIST = [
@@ -131,9 +129,8 @@ async def check_arbitrage_opportunities(application):
 
 
 async def watch_order_book_for_pair(exchange, pair, ex_id):
-    last_update = time.time()
-    while True:
-        try:
+    try:
+        while True:
             order_book = await exchange.watch_order_book(pair)
             
             best_bid = order_book['bids'][0][0] if order_book['bids'] else 0
@@ -147,23 +144,14 @@ async def watch_order_book_for_pair(exchange, pair, ex_id):
                 'ask': best_ask,
                 'ask_volume': best_ask_volume
             }
-            last_update = time.time()
-        except ccxt.NetworkError as e:
-            logger.error(f"Erro de rede no WebSocket para {pair} em {ex_id}: {e}")
-        except ccxt.ExchangeError as e:
-            logger.error(f"Erro da exchange no WebSocket para {pair} em {ex_id}: {e}")
-        except Exception as e:
-            logger.error(f"Erro inesperado no WebSocket para {pair} em {ex_id}: {e}")
-
-        # Verifica se os dados estão desatualizados
-        if time.time() - last_update > WEBSOCKET_TIMEOUT:
-            logger.warning(f"Conexão WebSocket para {pair} em {ex_id} está sem atualizações por mais de {WEBSOCKET_TIMEOUT} segundos. Reconectando...")
-            await exchange.close()
-            exchange_class = getattr(ccxt, ex_id)
-            exchange = exchange_class({'enableRateLimit': True, 'timeout': 10000})
-            global_exchanges_instances[ex_id] = exchange
-            last_update = time.time()
-            continue
+    except ccxt.NetworkError as e:
+        logger.error(f"Erro de rede no WebSocket para {pair} em {ex_id}: {e}")
+    except ccxt.ExchangeError as e:
+        logger.error(f"Erro da exchange no WebSocket para {pair} em {ex_id}: {e}")
+    except Exception as e:
+        logger.error(f"Erro inesperado no WebSocket para {pair} em {ex_id}: {e}")
+    finally:
+        await exchange.close()
 
 
 async def watch_all_exchanges():
