@@ -18,7 +18,7 @@ DEFAULT_FEE_PERCENTAGE = 0.1
 # Limite máximo de lucro bruto para validação de dados.
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0
 
-# Exchanges confiáveis para monitorar (BITFINEX REMOVIDA)
+# Exchanges confiáveis para monitorar
 EXCHANGES_LIST = [
     'binance', 'coinbase', 'kraken', 'okx', 'bybit',
     'kucoin', 'bitstamp', 'bitget', 'mexc'
@@ -140,10 +140,15 @@ async def check_arbitrage_opportunities(application):
 
 async def watch_order_book_for_pair(exchange, pair, ex_id):
     """
-    Função que apenas atualiza os dados de mercado.
+    Função que atualiza os dados de mercado com reconexão automática.
     """
-    try:
-        while True:
+    reconnect_delay = 1  # Tempo inicial de espera para reconexão (em segundos)
+    max_reconnect_delay = 60 # Tempo máximo de espera para reconexão
+
+    while True:
+        try:
+            # O ccxt.pro cuida da lógica interna de reconexão. 
+            # No caso de um erro, o loop `while` externo garante que o `watch_order_book` será chamado novamente.
             order_book = await exchange.watch_order_book(pair)
             
             best_bid = order_book['bids'][0][0] if order_book['bids'] else 0
@@ -157,14 +162,18 @@ async def watch_order_book_for_pair(exchange, pair, ex_id):
                 'ask': best_ask,
                 'ask_volume': best_ask_volume
             }
-    except ccxt.NetworkError as e:
-        logger.error(f"Erro de rede no WebSocket para {pair} em {ex_id}: {e}")
-    except ccxt.ExchangeError as e:
-        logger.error(f"Erro da exchange no WebSocket para {pair} em {ex_id}: {e}")
-    except Exception as e:
-        logger.error(f"Erro inesperado no WebSocket para {pair} em {ex_id}: {e}")
-    finally:
-        await exchange.close()
+            # Se a conexão for bem-sucedida, resetamos o delay
+            reconnect_delay = 1
+
+        except (ccxt.NetworkError, ccxt.ExchangeError) as e:
+            logger.error(f"Erro no WebSocket para {pair} em {ex_id}: {e}. Tentando reconectar em {reconnect_delay}s...")
+            await asyncio.sleep(reconnect_delay)
+            reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
+            
+        except Exception as e:
+            logger.error(f"Erro inesperado no WebSocket para {pair} em {ex_id}: {e}. Tentando reconectar em {reconnect_delay}s...")
+            await asyncio.sleep(reconnect_delay)
+            reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
 
 
 async def watch_all_exchanges():
