@@ -1,4 +1,3 @@
-# main.py (substitua seu arquivo por este - faça backup antes)
 import asyncio
 import logging
 from telegram import Update, BotCommand
@@ -7,7 +6,7 @@ import ccxt.pro as ccxt
 import os
 import nest_asyncio
 
-# Aplica o patch para permitir loops aninhados (útil em alguns ambientes)
+# Aplica o patch para permitir loops aninhados
 nest_asyncio.apply()
 
 # --- Configurações básicas ---
@@ -19,12 +18,13 @@ DEFAULT_FEE_PERCENTAGE = 0.1
 # Limite máximo de lucro bruto para validação de dados.
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0
 
-# Exchanges e pares (mantive sua lista original — ajuste para teste se quiser)
+# Exchanges confiáveis para monitorar (BITFINEX REMOVIDA)
 EXCHANGES_LIST = [
     'binance', 'coinbase', 'kraken', 'okx', 'bybit',
     'kucoin', 'bitstamp', 'bitget', 'mexc'
 ]
 
+# Pares USDT - OTIMIZADA para 80 principais moedas
 PAIRS = [
     "BTC/USDT", "ETH/USDT", "XRP/USDT", "USDT/USDT", "BNB/USDT", "SOL/USDT",
     "USDC/USDT", "TRX/USDT", "DOGE/USDT", "ADA/USDT", "WBTC/USDT", "STETH/USDT",
@@ -42,20 +42,22 @@ PAIRS = [
     "SUSHI/USDT", "1INCH/USDT", "YFI/USDT", "KNC/USDT", "BAND/USDT", "RLC/USDT"
 ]
 
-# Logging
+# Configuração de logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Globals
 global_exchanges_instances = {}
 GLOBAL_MARKET_DATA = {pair: {} for pair in PAIRS}
 markets_loaded = {}
 
 
 async def check_arbitrage_opportunities(application):
+    """
+    Função que checa oportunidades de arbitragem em loop.
+    """
     bot = application.bot
     while True:
         try:
@@ -72,26 +74,24 @@ async def check_arbitrage_opportunities(application):
             fee = application.bot_data.get('fee_percentage', DEFAULT_FEE_PERCENTAGE) / 100.0
 
             for pair in PAIRS:
-                market_data = GLOBAL_MARKET_DATA.get(pair, {})
+                market_data = GLOBAL_MARKET_DATA[pair]
                 if len(market_data) < 2:
                     continue
 
                 best_buy_price = float('inf')
                 buy_ex_id = None
                 buy_data = None
-
+                
                 best_sell_price = 0
                 sell_ex_id = None
                 sell_data = None
 
                 for ex_id, data in market_data.items():
-                    if not data:
-                        continue
                     if data.get('ask') is not None and data['ask'] < best_buy_price:
                         best_buy_price = data['ask']
                         buy_ex_id = ex_id
                         buy_data = data
-
+                    
                     if data.get('bid') is not None and data['bid'] > best_sell_price:
                         best_sell_price = data['bid']
                         sell_ex_id = ex_id
@@ -99,26 +99,21 @@ async def check_arbitrage_opportunities(application):
 
                 if not buy_ex_id or not sell_ex_id or buy_ex_id == sell_ex_id:
                     continue
-
-                # cálculo de lucros - protegido contra divisão por zero
-                try:
-                    gross_profit = (best_sell_price - best_buy_price) / best_buy_price
-                except Exception:
-                    continue
+                
+                gross_profit = (best_sell_price - best_buy_price) / best_buy_price
                 gross_profit_percentage = gross_profit * 100
 
                 if gross_profit_percentage > MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK:
                     continue
 
-                # **CORREÇÃO IMPORTANTE**: sem teto superior — aceita todo lucro >= minimo
                 net_profit_percentage = gross_profit_percentage - (2 * fee * 100)
-
+                
                 if net_profit_percentage >= lucro_minimo:
                     required_buy_volume = trade_amount_usd / best_buy_price
                     required_sell_volume = trade_amount_usd / best_sell_price
 
-                    buy_volume = buy_data.get('ask_volume', 0) or 0
-                    sell_volume = sell_data.get('bid_volume', 0) or 0
+                    buy_volume = buy_data.get('ask_volume', 0) if buy_data.get('ask_volume') is not None else 0
+                    sell_volume = sell_data.get('bid_volume', 0) if sell_data.get('bid_volume') is not None else 0
 
                     has_sufficient_liquidity = (
                         buy_volume >= required_buy_volume and
@@ -127,70 +122,62 @@ async def check_arbitrage_opportunities(application):
 
                     if has_sufficient_liquidity:
                         msg = (f"💰 Arbitragem para {pair}!\n"
-                               f"Compre em {buy_ex_id}: {best_buy_price:.8f}\n"
-                               f"Venda em {sell_ex_id}: {best_sell_price:.8f}\n"
-                               f"Lucro Líquido: {net_profit_percentage:.2f}%\n"
-                               f"Volume: ${trade_amount_usd:.2f}")
+                            f"Compre em {buy_ex_id}: {best_buy_price:.8f}\n"
+                            f"Venda em {sell_ex_id}: {best_sell_price:.8f}\n"
+                            f"Lucro Líquido: {net_profit_percentage:.2f}%\n"
+                            f"Volume: ${trade_amount_usd:.2f}"
+                        )
                         logger.info(msg)
                         await bot.send_message(chat_id=chat_id, text=msg)
+                else:
+                    logger.debug(f"Oportunidade para {pair}: Lucro Líquido {net_profit_percentage:.2f}% (abaixo do mínimo de {lucro_minimo:.2f}%)")
 
         except Exception as e:
             logger.error(f"Erro na checagem de arbitragem: {e}", exc_info=True)
-
+        
         await asyncio.sleep(5)
 
 
 async def watch_order_book_for_pair(exchange, pair, ex_id):
     """
-    Mínima mudança: proteger o loop que chama exchange.watch_order_book
-    para que o bot não trave quando a exchange fechar a conexão.
-    Em caso de erro: remove o dado anterior para esse pair/exchange e tenta de novo.
+    Função que apenas atualiza os dados de mercado.
     """
-    while True:
-        try:
+    try:
+        while True:
             order_book = await exchange.watch_order_book(pair)
+            
+            best_bid = order_book['bids'][0][0] if order_book['bids'] else 0
+            best_bid_volume = order_book['bids'][0][1] if order_book['bids'] else 0
+            best_ask = order_book['asks'][0][0] if order_book['asks'] else float('inf')
+            best_ask_volume = order_book['asks'][0][1] if order_book['asks'] else 0
 
-            best_bid = order_book['bids'][0][0] if order_book.get('bids') else 0
-            best_bid_volume = order_book['bids'][0][1] if order_book.get('bids') else 0
-            best_ask = order_book['asks'][0][0] if order_book.get('asks') else float('inf')
-            best_ask_volume = order_book['asks'][0][1] if order_book.get('asks') else 0
-
-            GLOBAL_MARKET_DATA.setdefault(pair, {})[ex_id] = {
+            GLOBAL_MARKET_DATA[pair][ex_id] = {
                 'bid': best_bid,
                 'bid_volume': best_bid_volume,
                 'ask': best_ask,
                 'ask_volume': best_ask_volume
             }
-
-        except (ccxt.NetworkError, ccxt.ExchangeError) as e:
-            logger.error(f"Erro no WebSocket para {pair} em {ex_id}: {type(e).__name__}: {e}")
-            # remove dado antigo para evitar falsos positivos
-            GLOBAL_MARKET_DATA.setdefault(pair, {}).pop(ex_id, None)
-            await asyncio.sleep(5)
-
-        except AttributeError as e:
-            # captura erro interno relacionado a conexões (ex: _buffer None)
-            logger.error(f"AttributeError no WebSocket para {pair} em {ex_id}: {e}")
-            GLOBAL_MARKET_DATA.setdefault(pair, {}).pop(ex_id, None)
-            await asyncio.sleep(5)
-
-        except Exception as e:
-            logger.error(f"Erro inesperado no WebSocket para {pair} em {ex_id}: {e}", exc_info=True)
-            GLOBAL_MARKET_DATA.setdefault(pair, {}).pop(ex_id, None)
-            await asyncio.sleep(5)
+    except ccxt.NetworkError as e:
+        logger.error(f"Erro de rede no WebSocket para {pair} em {ex_id}: {e}")
+    except ccxt.ExchangeError as e:
+        logger.error(f"Erro da exchange no WebSocket para {pair} em {ex_id}: {e}")
+    except Exception as e:
+        logger.error(f"Erro inesperado no WebSocket para {pair} em {ex_id}: {e}")
+    finally:
+        await exchange.close()
 
 
 async def watch_all_exchanges():
     tasks = []
     for ex_id in EXCHANGES_LIST:
+        exchange_class = getattr(ccxt, ex_id)
+        exchange = exchange_class({
+            'enableRateLimit': True,
+            'timeout': 10000,
+        })
+        global_exchanges_instances[ex_id] = exchange
+        
         try:
-            exchange_class = getattr(ccxt, ex_id)
-            exchange = exchange_class({
-                'enableRateLimit': True,
-                'timeout': 10000,
-            })
-            global_exchanges_instances[ex_id] = exchange
-
             logger.info(f"Carregando mercados para {ex_id}...")
             await exchange.load_markets()
             markets_loaded[ex_id] = True
@@ -198,19 +185,16 @@ async def watch_all_exchanges():
 
             for pair in PAIRS:
                 if pair in exchange.markets:
-                    tasks.append(asyncio.create_task(watch_order_book_for_pair(exchange, pair, ex_id)))
+                    tasks.append(asyncio.create_task(
+                        watch_order_book_for_pair(exchange, pair, ex_id)
+                    ))
                 else:
-                    logger.debug(f"Par {pair} não está disponível em {ex_id}. Ignorando...")
-
+                    logger.warning(f"Par {pair} não está disponível em {ex_id}. Ignorando...")
         except Exception as e:
-            logger.error(f"ERRO ao inicializar exchange {ex_id}: {e}", exc_info=True)
-            # se falhar aqui, deixamos a exchange de fora e seguimos com as outras
-
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
-    else:
-        logger.warning("Nenhuma task de market data foi criada. Verifique EXCHANGES_LIST / PAIRS.")
-
+            logger.error(f"ERRO ao carregar mercados de {ex_id}: {e}")
+    
+    logger.info("Iniciando WebSockets para todas as exchanges e pares válidos...")
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.bot_data['admin_chat_id'] = update.message.chat_id
@@ -230,7 +214,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     logger.info(f"Bot iniciado por chat_id: {update.message.chat_id}")
 
-
 async def setlucro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         valor = float(context.args[0])
@@ -242,7 +225,6 @@ async def setlucro(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Lucro mínimo definido para {valor}% por {update.message.chat_id}")
     except (IndexError, ValueError):
         await update.message.reply_text("Uso incorreto. Exemplo: /setlucro 2.5")
-
 
 async def setvolume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -256,7 +238,6 @@ async def setvolume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except (IndexError, ValueError):
         await update.message.reply_text("Uso incorreto. Exemplo: /setvolume 100")
 
-
 async def setfee(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         valor = float(context.args[0])
@@ -269,22 +250,20 @@ async def setfee(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except (IndexError, ValueError):
         await update.message.reply_text("Uso incorreto. Exemplo: /setfee 0.075")
 
-
 async def stop_arbitrage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.bot_data['admin_chat_id'] = None
     await update.message.reply_text("Alertas desativados. Use /start para reativar.")
     logger.info(f"Alertas de arbitragem desativados por {update.message.chat_id}")
 
-
 async def main():
     application = ApplicationBuilder().token(TOKEN).build()
-
+    
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("setlucro", setlucro))
     application.add_handler(CommandHandler("setvolume", setvolume))
     application.add_handler(CommandHandler("setfee", setfee))
     application.add_handler(CommandHandler("stop", stop_arbitrage))
-
+    
     await application.bot.set_my_commands([
         BotCommand("start", "Iniciar o bot e ver configurações"),
         BotCommand("setlucro", "Definir lucro mínimo em % (Ex: /setlucro 2.5)"),
@@ -293,30 +272,20 @@ async def main():
         BotCommand("stop", "Parar de receber alertas")
     ])
 
-    logger.info("Iniciando coleta de mercados e checador de arbitragem...")
+    logger.info("Bot iniciado com sucesso e aguardando mensagens...")
 
     try:
-        # start das tasks de market data (não bloqueante)
         asyncio.create_task(watch_all_exchanges())
-        # start do checador de arbitragem
         asyncio.create_task(check_arbitrage_opportunities(application))
-
-        # start polling Telegram (bloqueia até interrupção)
+        
         await application.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
 
     except Exception as e:
         logger.error(f"Erro no loop principal do bot: {e}", exc_info=True)
     finally:
         logger.info("Fechando conexões das exchanges...")
-        close_tasks = []
-        for ex in list(global_exchanges_instances.values()):
-            try:
-                close_tasks.append(ex.close())
-            except Exception:
-                pass
-        if close_tasks:
-            await asyncio.gather(*close_tasks, return_exceptions=True)
-
+        tasks = [ex.close() for ex in global_exchanges_instances.values()]
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 if __name__ == "__main__":
     asyncio.run(main())
