@@ -139,8 +139,11 @@ async def check_arbitrage_opportunities(application):
 
 
 async def watch_order_book_for_pair(exchange, pair, ex_id):
-    while True:
-        try:
+    """
+    Função que apenas atualiza os dados de mercado.
+    """
+    try:
+        while True:
             order_book = await exchange.watch_order_book(pair)
             
             best_bid = order_book['bids'][0][0] if order_book['bids'] else 0
@@ -154,9 +157,14 @@ async def watch_order_book_for_pair(exchange, pair, ex_id):
                 'ask': best_ask,
                 'ask_volume': best_ask_volume
             }
-        except Exception as e:
-            logger.error(f"Erro no WebSocket para {pair} em {ex_id}: {e}. Tentando reconectar em 5 segundos...")
-            await asyncio.sleep(5)
+    except ccxt.NetworkError as e:
+        logger.error(f"Erro de rede no WebSocket para {pair} em {ex_id}: {e}")
+    except ccxt.ExchangeError as e:
+        logger.error(f"Erro da exchange no WebSocket para {pair} em {ex_id}: {e}")
+    except Exception as e:
+        logger.error(f"Erro inesperado no WebSocket para {pair} em {ex_id}: {e}")
+    finally:
+        await exchange.close()
 
 
 async def watch_all_exchanges():
@@ -215,3 +223,69 @@ async def setlucro(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.bot_data['lucro_minimo_porcentagem'] = valor
         await update.message.reply_text(f"Lucro mínimo atualizado para {valor:.2f}%")
         logger.info(f"Lucro mínimo definido para {valor}% por {update.message.chat_id}")
+    except (IndexError, ValueError):
+        await update.message.reply_text("Uso incorreto. Exemplo: /setlucro 2.5")
+
+async def setvolume(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        valor = float(context.args[0])
+        if valor <= 0:
+            await update.message.reply_text("O volume de trade deve ser um valor positivo.")
+            return
+        context.bot_data['trade_amount_usd'] = valor
+        await update.message.reply_text(f"Volume de trade para checagem de liquidez atualizado para ${valor:.2f} USD")
+        logger.info(f"Volume de trade definido para ${valor} por {update.message.chat_id}")
+    except (IndexError, ValueError):
+        await update.message.reply_text("Uso incorreto. Exemplo: /setvolume 100")
+
+async def setfee(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        valor = float(context.args[0])
+        if valor < 0:
+            await update.message.reply_text("A taxa de negociação não pode ser negativa.")
+            return
+        context.bot_data['fee_percentage'] = valor
+        await update.message.reply_text(f"Taxa de negociação por lado atualizada para {valor:.3f}%")
+        logger.info(f"Taxa de negociação definida para {valor}% por {update.message.chat_id}")
+    except (IndexError, ValueError):
+        await update.message.reply_text("Uso incorreto. Exemplo: /setfee 0.075")
+
+async def stop_arbitrage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.bot_data['admin_chat_id'] = None
+    await update.message.reply_text("Alertas desativados. Use /start para reativar.")
+    logger.info(f"Alertas de arbitragem desativados por {update.message.chat_id}")
+
+async def main():
+    application = ApplicationBuilder().token(TOKEN).build()
+    
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("setlucro", setlucro))
+    application.add_handler(CommandHandler("setvolume", setvolume))
+    application.add_handler(CommandHandler("setfee", setfee))
+    application.add_handler(CommandHandler("stop", stop_arbitrage))
+    
+    await application.bot.set_my_commands([
+        BotCommand("start", "Iniciar o bot e ver configurações"),
+        BotCommand("setlucro", "Definir lucro mínimo em % (Ex: /setlucro 2.5)"),
+        BotCommand("setvolume", "Definir volume de trade em USD para liquidez (Ex: /setvolume 100)"),
+        BotCommand("setfee", "Definir taxa de negociação por lado em % (Ex: /setfee 0.075)"),
+        BotCommand("stop", "Parar de receber alertas")
+    ])
+
+    logger.info("Bot iniciado com sucesso e aguardando mensagens...")
+
+    try:
+        asyncio.create_task(watch_all_exchanges())
+        asyncio.create_task(check_arbitrage_opportunities(application))
+        
+        await application.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
+
+    except Exception as e:
+        logger.error(f"Erro no loop principal do bot: {e}", exc_info=True)
+    finally:
+        logger.info("Fechando conexões das exchanges...")
+        tasks = [ex.close() for ex in global_exchanges_instances.values()]
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+if __name__ == "__main__":
+    asyncio.run(main())
