@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import os
-from telegram import Update, BotCommand, Bot
+from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import ccxt.pro as ccxt
 import nest_asyncio
@@ -46,13 +46,8 @@ PAIRS_BASE = [
 PAIRS = [f"{coin}/USDT" for coin in PAIRS_BASE]
 
 # Variáveis globais
-global_exchanges_instances = {}
 GLOBAL_MARKET_DATA = {pair: {} for pair in PAIRS}
-markets_loaded = {}
 GLOBAL_MARKET_DATA_LOCK = asyncio.Lock()
-
-# Telegram bot
-bot = None
 
 # --- FUNÇÕES DE HANDLER DO TELEGRAM ---
 
