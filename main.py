@@ -27,8 +27,8 @@ EXCHANGES_LIST = [
     'kucoin', 'bitstamp', 'bitget', 'huobi', 'gateio'
 ]
 
-# Lista de 150 pares de moedas, ordenados por capitalização de mercado
-ALL_PAIRS = [
+# Lista de 150 pares de moedas, ordenados por capitalização de mercado e sem duplicatas
+ALL_PAIRS_WITH_DUPLICATES = [
     "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "DOGE/USDT",
     "TON/USDT", "ADA/USDT", "TRX/USDT", "SHIB/USDT", "AVAX/USDT", "DOT/USDT",
     "BCH/USDT", "LINK/USDT", "LTC/USDT", "MATIC/USDT", "UNI/USDT", "ETC/USDT",
@@ -55,6 +55,8 @@ ALL_PAIRS = [
     "AR/USDT", "STG/USDT", "AGIX/USDT", "FXS/USDT", "DYDX/USDT", "MINA/USDT",
     "GMX/USDT", "TUSD/USDT", "USDP/USDT", "PAXG/USDT", "USDC/USDT", "USDS/USDT"
 ]
+
+ALL_PAIRS = list(dict.fromkeys(ALL_PAIRS_WITH_DUPLICATES))
 
 # Dividir os pares em grupos de alta e baixa prioridade
 HIGH_PRIORITY_PAIRS = ALL_PAIRS[:15]
@@ -287,7 +289,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Olá! Bot de Arbitragem Híbrido Ativado.\n"
         "Monitorando 15 pares de alta prioridade em tempo real (WebSockets)\n"
-        "e os 135 pares restantes por polling (a cada 5s).\n"
+        f"e os {len(LOW_PRIORITY_PAIRS)} pares restantes por polling (a cada 5s).\n"
         f"Lucro mínimo atual: {context.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)}%\n"
         f"Volume de trade para liquidez: ${context.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD):.2f}\n"
         f"Taxa de negociação por lado: {context.bot_data.get('fee_percentage', DEFAULT_FEE_PERCENTAGE)}%\n\n"
