@@ -21,13 +21,17 @@ MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0
 # Intervalo de tempo entre cada busca (polling) em segundos
 POLLING_INTERVAL_SECONDS = 5
 
-# Lista de 10 exchanges confiáveis.
+# Lista de exchanges confiáveis.
 EXCHANGES_LIST = [
     'binance', 'coinbase', 'kraken', 'okx', 'bybit',
     'kucoin', 'bitstamp', 'bitget', 'huobi', 'gateio'
 ]
 
-# Lista de 150 pares de moedas, ordenados por capitalização de mercado e sem duplicatas
+# Todas as 10 exchanges são de alta prioridade para os pares selecionados
+HIGH_PRIORITY_EXCHANGES = EXCHANGES_LIST
+LOW_PRIORITY_EXCHANGES = []
+
+# Lista de 160 pares de moedas, ordenados por capitalização de mercado e sem duplicatas
 ALL_PAIRS_WITH_DUPLICATES = [
     "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "DOGE/USDT",
     "TON/USDT", "ADA/USDT", "TRX/USDT", "SHIB/USDT", "AVAX/USDT", "DOT/USDT",
@@ -53,14 +57,17 @@ ALL_PAIRS_WITH_DUPLICATES = [
     "KNC/USDT", "BAND/USDT", "RLC/USDT", "DASH/USDT", "DCR/USDT", "ZRX/USDT",
     "BTT/USDT", "VTC/USDT", "FLOKI/USDT", "BONK/USDT", "FLUX/USDT", "CELO/USDT",
     "AR/USDT", "STG/USDT", "AGIX/USDT", "FXS/USDT", "DYDX/USDT", "MINA/USDT",
-    "GMX/USDT", "TUSD/USDT", "USDP/USDT", "PAXG/USDT", "USDC/USDT", "USDS/USDT"
+    "GMX/USDT", "TUSD/USDT", "USDP/USDT", "PAXG/USDT", "USDC/USDT", "USDS/USDT",
+    "CFX/USDT", "SUI/USDT", "ASTR/USDT", "ROSE/USDT", "MOVR/USDT", "AKT/USDT",
+    "WOO/USDT", "CSPR/USDT", "NMR/USDT", "GTC/USDT", "HBAR/USDT", "CELO/USDT",
+    "AIOZ/USDT", "CTSI/USDT", "TFUEL/USDT"
 ]
 
 ALL_PAIRS = list(dict.fromkeys(ALL_PAIRS_WITH_DUPLICATES))
 
-# Dividir os pares em grupos de alta e baixa prioridade
-HIGH_PRIORITY_PAIRS = ALL_PAIRS[:15]
-LOW_PRIORITY_PAIRS = ALL_PAIRS[15:]
+# 10 pares de alta prioridade para o teste
+HIGH_PRIORITY_PAIRS = ALL_PAIRS[:10]
+LOW_PRIORITY_PAIRS = ALL_PAIRS[10:]
 
 # Configuração de logging
 logging.basicConfig(
@@ -85,8 +92,11 @@ async def fetch_market_data_for_low_priority_pairs():
                 exchange = global_exchanges_instances.get(ex_id)
                 if not exchange or not markets_loaded.get(ex_id):
                     continue
-
+                
+                # Para exchanges de alta prioridade, buscamos os de baixa prioridade
+                # para completar os dados.
                 pairs_to_fetch = [pair for pair in LOW_PRIORITY_PAIRS if pair in exchange.markets]
+
                 if pairs_to_fetch:
                     fetch_tasks.append(
                         asyncio.create_task(
@@ -110,7 +120,7 @@ async def fetch_tickers_safe(exchange, ex_id, pairs_to_fetch):
         tickers = await exchange.fetch_tickers(pairs_to_fetch)
         for pair in pairs_to_fetch:
             ticker = tickers.get(pair)
-            if ticker and ticker.get('bid') and ticker.get('ask'):
+            if ticker and ticker.get('bid') is not None and ticker.get('ask') is not None:
                 GLOBAL_MARKET_DATA[pair][ex_id] = {
                     'bid': ticker.get('bid'),
                     'bid_volume': ticker.get('bidVolume'),
@@ -135,9 +145,8 @@ async def check_arbitrage_opportunities(application):
             lucro_minimo = application.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)
             trade_amount_usd = application.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD)
             
-            # Checa oportunidades para TODOS os pares
             for pair in ALL_PAIRS:
-                market_data = GLOBAL_MARKET_DATA[pair]
+                market_data = GLOBAL_MARKET_DATA.get(pair, {})
                 if len(market_data) < 2:
                     continue
 
@@ -175,8 +184,8 @@ async def check_arbitrage_opportunities(application):
                     required_buy_volume = trade_amount_usd / best_buy_price
                     required_sell_volume = trade_amount_usd / best_sell_price
 
-                    buy_volume = buy_data.get('ask_volume', 0) if buy_data.get('ask_volume') is not None else 0
-                    sell_volume = sell_data.get('bid_volume', 0) if sell_data.get('bid_volume') is not None else 0
+                    buy_volume = buy_data.get('ask_volume', 0) if buy_data else 0
+                    sell_volume = sell_data.get('bid_volume', 0) if sell_data else 0
 
                     has_sufficient_liquidity = (
                         buy_volume >= required_buy_volume and
@@ -266,12 +275,11 @@ async def start_monitoring_tasks():
     Inicia as tarefas de monitoramento para ambos os grupos.
     """
     tasks = []
-    for ex_id in EXCHANGES_LIST:
+    for ex_id in HIGH_PRIORITY_EXCHANGES:
         exchange = global_exchanges_instances.get(ex_id)
         if not exchange or not markets_loaded.get(ex_id):
             continue
-
-        # Inicia WebSockets para o grupo de alta prioridade
+        
         for pair in HIGH_PRIORITY_PAIRS:
             if pair in exchange.markets:
                 tasks.append(asyncio.create_task(
@@ -288,7 +296,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.bot_data['admin_chat_id'] = update.message.chat_id
     await update.message.reply_text(
         "Olá! Bot de Arbitragem Híbrido Ativado.\n"
-        "Monitorando 15 pares de alta prioridade em tempo real (WebSockets)\n"
+        "Monitorando 10 pares em tempo real (WebSockets) nas 10 exchanges.\n"
         f"e os {len(LOW_PRIORITY_PAIRS)} pares restantes por polling (a cada 5s).\n"
         f"Lucro mínimo atual: {context.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)}%\n"
         f"Volume de trade para liquidez: ${context.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD):.2f}\n"
