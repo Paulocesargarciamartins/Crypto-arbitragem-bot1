@@ -18,15 +18,17 @@ DEFAULT_FEE_PERCENTAGE = 0.1
 # Limite máximo de lucro bruto para validação de dados.
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0
 
-# Exchanges confiáveis para monitorar
-# A Mexc foi substituída por Huobi (HTX) devido a instabilidade nos logs
+# Intervalo de tempo entre cada busca (polling) em segundos
+POLLING_INTERVAL_SECONDS = 5
+
+# Lista de 10 exchanges confiáveis. Adicionada 'gateio' para totalizar 10.
 EXCHANGES_LIST = [
     'binance', 'coinbase', 'kraken', 'okx', 'bybit',
-    'kucoin', 'bitstamp', 'bitget', 'huobi'
+    'kucoin', 'bitstamp', 'bitget', 'huobi', 'gateio'
 ]
 
-# Pares USDT - OTIMIZADA para 80 principais moedas
-PAIRS = [
+# Pares USDT - OTIMIZADA para 150 moedas
+ALL_PAIRS = [
     "BTC/USDT", "ETH/USDT", "XRP/USDT", "USDT/USDT", "BNB/USDT", "SOL/USDT",
     "USDC/USDT", "TRX/USDT", "DOGE/USDT", "ADA/USDT", "WBTC/USDT", "STETH/USDT",
     "XLM/USDT", "SUI/USDT", "BCH/USDT", "LINK/USDT", "HBAR/USDT", "AVAX/USDT",
@@ -40,8 +42,24 @@ PAIRS = [
     "FET/USDT", "STX/USDT", "GRT/USDT", "LDO/USDT", "FLOW/USDT", "FTM/USDT",
     "SAND/USDT", "MANA/USDT", "GALA/USDT", "AXS/USDT", "ENJ/USDT", "CHZ/USDT",
     "THETA/USDT", "EOS/USDT", "MKR/USDT", "CRV/USDT", "BAT/USDT", "COMP/USDT",
-    "SUSHI/USDT", "1INCH/USDT", "YFI/USDT", "KNC/USDT", "BAND/USDT", "RLC/USDT"
+    "SUSHI/USDT", "1INCH/USDT", "YFI/USDT", "KNC/USDT", "BAND/USDT", "RLC/USDT",
+    "CVC/USDT", "DASH/USDT", "ZEC/USDT", "SNX/USDT", "CELO/USDT", "QTUM/USDT",
+    "OMG/USDT", "KSM/USDT", "EGLD/USDT", "ZIL/USDT", "OCEAN/USDT", "LRC/USDT",
+    "KAVA/USDT", "WAVES/USDT", "FIL/USDT", "GNO/USDT", "PAXG/USDT", "RUNE/USDT",
+    "SC/USDT", "VET/USDT", "XVG/USDT", "XTZ/USDT", "ZRX/USDT", "BAL/USDT",
+    "C98/USDT", "LINA/USDT", "IOST/USDT", "ONE/USDT", "CELR/USDT", "PHA/USDT",
+    "ALPHA/USDT", "SFP/USDT", "TOMO/USDT", "IRIS/USDT", "CTK/USDT", "REEF/USDT",
+    "DGB/USDT", "AR/USDT", "HNT/USDT", "CHR/USDT", "OGN/USDT", "RLY/USDT",
+    "MASK/USDT", "AUDIO/USDT", "FIS/USDT", "LPT/USDT", "NKN/USDT", "ANKR/USDT",
+    "DENT/USDT", "BADGER/USDT", "BOND/USDT", "DODO/USDT", "FIO/USDT", "FORTH/USDT",
+    "LUNA/USDT", "JASMY/USDT", "MDX/USDT", "QNT/USDT", "SCRT/USDT", "SKL/USDT",
+    "UMA/USDT", "VITE/USDT", "YGG/USDT", "ALICE/USDT", "BICO/USDT", "CITY/USDT",
+    "ILV/USDT", "PYR/USDT", "SLP/USDT", "WTC/USDT"
 ]
+
+# Dividir os pares em grupos de alta e baixa prioridade
+HIGH_PRIORITY_PAIRS = ALL_PAIRS[:15]
+LOW_PRIORITY_PAIRS = ALL_PAIRS[15:]
 
 # Configuração de logging
 logging.basicConfig(
@@ -51,30 +69,73 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 global_exchanges_instances = {}
-GLOBAL_MARKET_DATA = {pair: {} for pair in PAIRS}
+GLOBAL_MARKET_DATA = {pair: {} for pair in ALL_PAIRS}
 markets_loaded = {}
 
 
+async def fetch_market_data_for_low_priority_pairs():
+    """
+    Busca dados para pares de baixa prioridade via polling (REST API).
+    """
+    while True:
+        try:
+            fetch_tasks = []
+            for ex_id in EXCHANGES_LIST:
+                exchange = global_exchanges_instances.get(ex_id)
+                if not exchange or not markets_loaded.get(ex_id):
+                    continue
+
+                pairs_to_fetch = [pair for pair in LOW_PRIORITY_PAIRS if pair in exchange.markets]
+                if pairs_to_fetch:
+                    fetch_tasks.append(
+                        asyncio.create_task(
+                            fetch_tickers_safe(exchange, ex_id, pairs_to_fetch)
+                        )
+                    )
+            
+            await asyncio.gather(*fetch_tasks, return_exceptions=True)
+
+        except Exception as e:
+            logger.error(f"Erro no loop de busca de dados de baixa prioridade: {e}", exc_info=True)
+        
+        await asyncio.sleep(POLLING_INTERVAL_SECONDS)
+
+
+async def fetch_tickers_safe(exchange, ex_id, pairs_to_fetch):
+    """
+    Busca tickers de forma segura para evitar erros.
+    """
+    try:
+        tickers = await exchange.fetch_tickers(pairs_to_fetch)
+        for pair in pairs_to_fetch:
+            ticker = tickers.get(pair)
+            if ticker and ticker.get('bid') and ticker.get('ask'):
+                GLOBAL_MARKET_DATA[pair][ex_id] = {
+                    'bid': ticker.get('bid'),
+                    'bid_volume': ticker.get('bidVolume'),
+                    'ask': ticker.get('ask'),
+                    'ask_volume': ticker.get('askVolume')
+                }
+    except Exception as e:
+        logger.error(f"Erro ao buscar tickers de {ex_id}: {e}")
+
 async def check_arbitrage_opportunities(application):
     """
-    Função que checa oportunidades de arbitragem em loop.
+    Checa oportunidades de arbitragem em loop.
     """
     bot = application.bot
     while True:
         try:
             chat_id = application.bot_data.get('admin_chat_id')
             if not chat_id:
-                logger.warning("Nenhum chat_id de administrador definido. O bot não enviará alertas.")
                 await asyncio.sleep(5)
                 continue
 
-            logger.info("Executando checagem de arbitragem...")
-
             lucro_minimo = application.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)
             trade_amount_usd = application.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD)
-            fee = application.bot_data.get('fee_percentage', DEFAULT_FEE_PERCENTAGE) / 100.0
-
-            for pair in PAIRS:
+            
+            # Checa oportunidades para TODOS os pares
+            for pair in ALL_PAIRS:
                 market_data = GLOBAL_MARKET_DATA[pair]
                 if len(market_data) < 2:
                     continue
@@ -107,7 +168,6 @@ async def check_arbitrage_opportunities(application):
                 if gross_profit_percentage > MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK:
                     continue
 
-                # --- CORREÇÃO: Cálculo do lucro líquido corrigido ---
                 net_profit_percentage = gross_profit_percentage - (2 * DEFAULT_FEE_PERCENTAGE)
                 
                 if net_profit_percentage >= lucro_minimo:
@@ -131,26 +191,22 @@ async def check_arbitrage_opportunities(application):
                         )
                         logger.info(msg)
                         await bot.send_message(chat_id=chat_id, text=msg)
-                else:
-                    logger.debug(f"Oportunidade para {pair}: Lucro Líquido {net_profit_percentage:.2f}% (abaixo do mínimo de {lucro_minimo:.2f}%)")
 
         except Exception as e:
             logger.error(f"Erro na checagem de arbitragem: {e}", exc_info=True)
         
-        await asyncio.sleep(5)
+        await asyncio.sleep(1)
 
 
 async def watch_order_book_for_pair(exchange, pair, ex_id):
     """
     Função que atualiza os dados de mercado com reconexão automática.
     """
-    reconnect_delay = 1  # Tempo inicial de espera para reconexão (em segundos)
-    max_reconnect_delay = 60 # Tempo máximo de espera para reconexão
+    reconnect_delay = 1
+    max_reconnect_delay = 60
 
     while True:
         try:
-            # O ccxt.pro cuida da lógica interna de reconexão. 
-            # No caso de um erro, o loop `while` externo garante que o `watch_order_book` será chamado novamente.
             order_book = await exchange.watch_order_book(pair)
             
             best_bid = order_book['bids'][0][0] if order_book['bids'] else 0
@@ -158,13 +214,13 @@ async def watch_order_book_for_pair(exchange, pair, ex_id):
             best_ask = order_book['asks'][0][0] if order_book['asks'] else float('inf')
             best_ask_volume = order_book['asks'][0][1] if order_book['asks'] else 0
 
-            GLOBAL_MARKET_DATA[pair][ex_id] = {
-                'bid': best_bid,
-                'bid_volume': best_bid_volume,
-                'ask': best_ask,
-                'ask_volume': best_ask_volume
-            }
-            # Se a conexão for bem-sucedida, resetamos o delay
+            if best_bid > 0 and best_ask > 0:
+                GLOBAL_MARKET_DATA[pair][ex_id] = {
+                    'bid': best_bid,
+                    'bid_volume': best_bid_volume,
+                    'ask': best_ask,
+                    'ask_volume': best_ask_volume
+                }
             reconnect_delay = 1
 
         except (ccxt.NetworkError, ccxt.ExchangeError) as e:
@@ -178,40 +234,61 @@ async def watch_order_book_for_pair(exchange, pair, ex_id):
             reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
 
 
-async def watch_all_exchanges():
+async def setup_exchanges():
+    """
+    Prepara as exchanges para uso, carregando os mercados.
+    """
     tasks = []
     for ex_id in EXCHANGES_LIST:
-        exchange_class = getattr(ccxt, ex_id)
-        exchange = exchange_class({
-            'enableRateLimit': True,
-            'timeout': 10000,
-        })
-        global_exchanges_instances[ex_id] = exchange
-        
         try:
-            logger.info(f"Carregando mercados para {ex_id}...")
-            await exchange.load_markets()
-            markets_loaded[ex_id] = True
-            logger.info(f"Mercados de {ex_id} carregados. Total de pares: {len(exchange.markets)}")
-
-            for pair in PAIRS:
-                if pair in exchange.markets:
-                    tasks.append(asyncio.create_task(
-                        watch_order_book_for_pair(exchange, pair, ex_id)
-                    ))
-                else:
-                    logger.warning(f"Par {pair} não está disponível em {ex_id}. Ignorando...")
+            exchange_class = getattr(ccxt, ex_id)
+            exchange = exchange_class({
+                'enableRateLimit': True,
+                'timeout': 10000,
+            })
+            global_exchanges_instances[ex_id] = exchange
+            
+            tasks.append(asyncio.create_task(exchange.load_markets()))
+            
         except Exception as e:
-            logger.error(f"ERRO ao carregar mercados de {ex_id}: {e}")
+            logger.error(f"ERRO ao instanciar ou carregar mercados de {ex_id}: {e}")
     
-    logger.info("Iniciando WebSockets para todas as exchanges e pares válidos...")
     await asyncio.gather(*tasks, return_exceptions=True)
+    
+    for ex_id, exchange in global_exchanges_instances.items():
+        if exchange.markets:
+            markets_loaded[ex_id] = True
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+async def start_monitoring_tasks():
+    """
+    Inicia as tarefas de monitoramento para ambos os grupos.
+    """
+    tasks = []
+    for ex_id in EXCHANGES_LIST:
+        exchange = global_exchanges_instances.get(ex_id)
+        if not exchange or not markets_loaded.get(ex_id):
+            continue
+
+        # Inicia WebSockets para o grupo de alta prioridade
+        for pair in HIGH_PRIORITY_PAIRS:
+            if pair in exchange.markets:
+                tasks.append(asyncio.create_task(
+                    watch_order_book_for_pair(exchange, pair, ex_id)
+                ))
+            else:
+                logger.warning(f"Par {pair} não disponível em {ex_id}. Ignorando na alta prioridade...")
+
+    logger.info("Iniciando monitoramento híbrido (WebSockets + Polling)...")
+    await asyncio.gather(*tasks)
+
+
+async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.bot_data['admin_chat_id'] = update.message.chat_id
     await update.message.reply_text(
-        "Olá! Bot de Arbitragem Ativado (Modo WebSocket).\n"
-        "Monitorando oportunidades de arbitragem em tempo real.\n"
+        "Olá! Bot de Arbitragem Híbrido Ativado.\n"
+        "Monitorando 15 pares de alta prioridade em tempo real (WebSockets)\n"
+        "e os 135 pares restantes por polling (a cada 5s).\n"
         f"Lucro mínimo atual: {context.bot_data.get('lucro_minimo_porcentagem', DEFAULT_LUCRO_MINIMO_PORCENTAGEM)}%\n"
         f"Volume de trade para liquidez: ${context.bot_data.get('trade_amount_usd', DEFAULT_TRADE_AMOUNT_USD):.2f}\n"
         f"Taxa de negociação por lado: {context.bot_data.get('fee_percentage', DEFAULT_FEE_PERCENTAGE)}%\n\n"
@@ -269,7 +346,7 @@ async def stop_arbitrage(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def main():
     application = ApplicationBuilder().token(TOKEN).build()
     
-    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("start", start_handler))
     application.add_handler(CommandHandler("setlucro", setlucro))
     application.add_handler(CommandHandler("setvolume", setvolume))
     application.add_handler(CommandHandler("setfee", setfee))
@@ -286,8 +363,11 @@ async def main():
     logger.info("Bot iniciado com sucesso e aguardando mensagens...")
 
     try:
-        asyncio.create_task(watch_all_exchanges())
+        await setup_exchanges()
+        
+        asyncio.create_task(fetch_market_data_for_low_priority_pairs())
         asyncio.create_task(check_arbitrage_opportunities(application))
+        asyncio.create_task(start_monitoring_tasks())
         
         await application.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
 
