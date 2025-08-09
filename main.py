@@ -42,7 +42,7 @@ ALL_PAIRS_WITH_DUPLICATES = [
     "THETA/USDT", "INJ/USDT", "MKR/USDT", "CHZ/USDT", "SAND/USDT", "AXS/USDT",
     "TIA/USDT", "ENJ/USDT", "LDO/USDT", "MANA/USDT", "GALA/USDT", "COMP/USDT",
     "PYTH/USDT", "EOS/USDT", "SNX/USDT", "KAS/USDT", "CRV/USDT", "WLD/USDT",
-    "FET/USDT", "ZEC/USDT", "QNT/USDT", "XMR/USDT", "ALGO/USDT", "RUNE/USDT",
+    "FET/USDT", "ZEC/USDT", "ALGO/USDT", "RUNE/USDT",
     "BAT/USDT", "OMG/USDT", "KSM/USDT", "EGLD/USDT", "ZIL/USDT", "OCEAN/USDT",
     "LRC/USDT", "KAVA/USDT", "WAVES/USDT", "GNO/USDT", "PAXG/USDT", "SC/USDT",
     "VET/USDT", "XVG/USDT", "XTZ/USDT", "ZRX/USDT", "BAL/USDT", "C98/USDT",
@@ -181,11 +181,15 @@ async def check_arbitrage_opportunities(application):
                 net_profit_percentage = gross_profit_percentage - (2 * DEFAULT_FEE_PERCENTAGE)
                 
                 if net_profit_percentage >= lucro_minimo:
+                    # Correção: Verificamos a existência dos dados de volume antes de tentar acessá-los.
+                    buy_volume = buy_data.get('ask_volume') if buy_data else None
+                    sell_volume = sell_data.get('bid_volume') if sell_data else None
+
+                    if buy_volume is None or sell_volume is None:
+                        continue # Pula esta iteração se os dados de volume não estiverem disponíveis
+                    
                     required_buy_volume = trade_amount_usd / best_buy_price
                     required_sell_volume = trade_amount_usd / best_sell_price
-
-                    buy_volume = buy_data.get('ask_volume', 0) if buy_data else 0
-                    sell_volume = sell_data.get('bid_volume', 0) if sell_data else 0
 
                     has_sufficient_liquidity = (
                         buy_volume >= required_buy_volume and
