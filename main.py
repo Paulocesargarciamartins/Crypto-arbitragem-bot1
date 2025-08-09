@@ -6,6 +6,7 @@ import ccxt.pro as ccxt
 import os
 import nest_asyncio
 
+# Aplica o patch para permitir loops aninhados
 nest_asyncio.apply()
 
 # --- Configurações básicas ---
@@ -14,13 +15,17 @@ DEFAULT_LUCRO_MINIMO_PORCENTAGEM = 2.0
 DEFAULT_TRADE_AMOUNT_USD = 50.0
 DEFAULT_FEE_PERCENTAGE = 0.1
 
+# Limite máximo de lucro bruto para validação de dados.
 MAX_GROSS_PROFIT_PERCENTAGE_SANITY_CHECK = 100.0
 
+# Exchanges confiáveis para monitorar
+# A Mexc foi substituída por Huobi (HTX) devido a instabilidade nos logs
 EXCHANGES_LIST = [
     'binance', 'coinbase', 'kraken', 'okx', 'bybit',
-    'kucoin', 'bitstamp', 'bitget', 'mexc'
+    'kucoin', 'bitstamp', 'bitget', 'huobi'
 ]
 
+# Pares USDT - OTIMIZADA para 80 principais moedas
 PAIRS = [
     "BTC/USDT", "ETH/USDT", "XRP/USDT", "USDT/USDT", "BNB/USDT", "SOL/USDT",
     "USDC/USDT", "TRX/USDT", "DOGE/USDT", "ADA/USDT", "WBTC/USDT", "STETH/USDT",
@@ -38,6 +43,7 @@ PAIRS = [
     "SUSHI/USDT", "1INCH/USDT", "YFI/USDT", "KNC/USDT", "BAND/USDT", "RLC/USDT"
 ]
 
+# Configuração de logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -50,6 +56,9 @@ markets_loaded = {}
 
 
 async def check_arbitrage_opportunities(application):
+    """
+    Função que checa oportunidades de arbitragem em loop.
+    """
     bot = application.bot
     while True:
         try:
@@ -132,11 +141,16 @@ async def check_arbitrage_opportunities(application):
 
 
 async def watch_order_book_for_pair(exchange, pair, ex_id):
-    reconnect_delay = 1
-    max_reconnect_delay = 60
+    """
+    Função que atualiza os dados de mercado com reconexão automática.
+    """
+    reconnect_delay = 1  # Tempo inicial de espera para reconexão (em segundos)
+    max_reconnect_delay = 60 # Tempo máximo de espera para reconexão
 
     while True:
         try:
+            # O ccxt.pro cuida da lógica interna de reconexão. 
+            # No caso de um erro, o loop `while` externo garante que o `watch_order_book` será chamado novamente.
             order_book = await exchange.watch_order_book(pair)
             
             best_bid = order_book['bids'][0][0] if order_book['bids'] else 0
@@ -150,6 +164,7 @@ async def watch_order_book_for_pair(exchange, pair, ex_id):
                 'ask': best_ask,
                 'ask_volume': best_ask_volume
             }
+            # Se a conexão for bem-sucedida, resetamos o delay
             reconnect_delay = 1
 
         except (ccxt.NetworkError, ccxt.ExchangeError) as e:
